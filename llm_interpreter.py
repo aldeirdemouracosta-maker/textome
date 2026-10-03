@@ -25,6 +25,25 @@ except ImportError:
 # Endereço do Ollama: variável OLLAMA_HOST (ex.: no Docker) ou localhost.
 DEFAULT_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
+# Esquemas de saída estruturada (Ollama >= 0.5 aceita JSON Schema em `format`).
+NAME_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "nome": {"type": "string", "description": "nome curto da classe (até 6 palavras)"},
+        "descricao": {"type": "string", "description": "1 a 2 frases sobre o tema central"},
+    },
+    "required": ["nome", "descricao"],
+}
+
+
+def assignment_schema(class_ids: List[int]) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {"classe": {"type": "integer", "enum": sorted(class_ids) + [0]}},
+        "required": ["classe"],
+    }
+
+
 # Sentinela: "usar o TTL padrão". None significa "sem expiração".
 USE_DEFAULT_TTL: Any = object()
 
@@ -391,22 +410,38 @@ Faça uma **interpretação aprofundada** (150-220 palavras) respondendo:
 
 Seja rigoroso e baseie-se apenas nos dados apresentados."""
 
-    def _call(self, prompt: str, json_mode: bool = False) -> str:
+    def _call(self, prompt: str, json_mode: bool = False,
+              schema: Optional[Dict[str, Any]] = None, temperature: Optional[float] = None) -> str:
+        """
+        schema: JSON Schema da resposta (saída estruturada). Se o servidor Ollama for
+        antigo e recusar o esquema, repete a chamada com format="json".
+        """
         if self.client is None:
             raise RuntimeError(
                 "Biblioteca 'ollama' não está instalada ou o cliente não foi inicializado."
             )
-        kwargs: Dict[str, Any] = {"format": "json"} if json_mode else {}
-        response = self.client.chat(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            options={
-                "temperature": self.temperature,
-                "num_predict": 1024,
-            },
-            **kwargs,
-        )
-        return strip_thinking(response["message"]["content"])
+
+        def chat(fmt: Any) -> str:
+            kwargs: Dict[str, Any] = {"format": fmt} if fmt is not None else {}
+            response = self.client.chat(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                options={
+                    "temperature": self.temperature if temperature is None else temperature,
+                    "num_predict": 1024,
+                },
+                **kwargs,
+            )
+            return strip_thinking(response["message"]["content"])
+
+        if schema is not None:
+            try:
+                return chat(schema)
+            except Exception as e:  # Ollama < 0.5 não aceita esquema
+                if "format" not in str(e).lower() and "schema" not in str(e).lower():
+                    raise
+                return chat("json")
+        return chat("json" if json_mode else None)
 
     def _extract_json(self, text: str) -> Dict[str, str]:
         match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -440,7 +475,7 @@ Seja rigoroso e baseie-se apenas nos dados apresentados."""
                 cached.class_id = class_id
                 return cached
 
-        raw_nome = self._call(self._prompt_nome_descricao(forms, segments), json_mode=True)
+        raw_nome = self._call(self._prompt_nome_descricao(forms, segments), schema=NAME_SCHEMA)
         parsed = self._extract_json(raw_nome)
         nome = parsed.get("nome", f"Classe {class_id}")
         descricao = parsed.get("descricao", "")
@@ -562,7 +597,17 @@ class MockOllamaClient:
         content = messages[-1]["content"] if messages else ""
         lower = content.lower()
 
-        if "traduza o texto" in lower:
+        if lower.startswith("atribuição de segmento"):
+            # Escolhe a opção com mais palavras em comum com o segmento (determinístico).
+            seg = re.search(r'"""(.*?)"""', content, re.DOTALL)
+            seg_words = set(re.findall(r"\w{4,}", (seg.group(1) if seg else "").lower()))
+            best, best_score = 0, 0
+            for cid, desc in re.findall(r"^- (\d+): (.*)$", content, re.MULTILINE):
+                score = len(seg_words & set(re.findall(r"\w{4,}", desc.lower())))
+                if int(cid) and score > best_score:
+                    best, best_score = int(cid), score
+            text = json.dumps({"classe": best})
+        elif "traduza o texto" in lower:
             match = re.search(r"<texto>\n?(.*?)\n?</texto>", content, re.DOTALL)
             original = match.group(1) if match else content
             text = f"[tradução simulada] {original}"
@@ -677,6 +722,30 @@ Segmentos:
 
 Explique diferenças temáticas e possíveis tensões discursivas (80-150 palavras, em português)."""
         return self._call(prompt)
+
+    def atribuir_segmento(self, texto: str, opcoes: Dict[int, str]) -> int:
+        """
+        Atribuição às cegas (validação): escolhe a classe cujo nome/descrição melhor
+        descreve o segmento. Retorna o número da classe, ou 0 se nenhuma servir.
+        Usa temperatura 0 para ser reprodutível.
+        """
+        lista = "\n".join(f"- {cid}: {desc}" for cid, desc in sorted(opcoes.items()))
+        prompt = f"""ATRIBUIÇÃO DE SEGMENTO (validação de classes, análise de discurso).
+
+Classes disponíveis (número: nome — descrição):
+{lista}
+- 0: nenhuma das classes
+
+Segmento de texto:
+\"\"\"{texto}\"\"\"
+
+Qual classe melhor descreve o segmento? Responda apenas com o JSON {{"classe": número}}."""
+        raw = self._call(prompt, schema=assignment_schema(list(opcoes)), temperature=0.0)
+        try:
+            value = int(self._extract_json(raw).get("classe", 0))
+        except (TypeError, ValueError):
+            return 0
+        return value if value in opcoes else 0
 
 
 def render_class_card(

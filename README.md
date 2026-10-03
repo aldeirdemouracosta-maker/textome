@@ -21,6 +21,7 @@ Interface moderna para **Classificação Hierárquica Descendante** (método Rei
 | `pipeline.py` | Pipeline sem interface + relatório/JSON/CSV |
 | `analises.py` | Estatísticas, AFC, similitude, nuvem e figuras |
 | `relatorio_docx.py` | Relatório Word |
+| `validacao.py` | Revisão de nomes, atribuição às cegas, kappa de Cohen |
 | `limpeza.py` | Limpeza IRaMuTeQ, validação de cabeçalhos, planilha → corpus |
 | `transcricao.py` | Áudio → texto com Whisper local (faster-whisper) |
 | `app_demo.py` | Demo só do módulo de interpretação |
@@ -140,6 +141,28 @@ Cada classe tem sempre a mesma cor em todos os gráficos (paleta validada para d
 com marcadores diferentes como segunda pista). Rótulos que não cabem sem sobreposição
 são omitidos e a figura informa quantos — a lista completa está em `classes.json`.
 
+## Validação humana e concordância (kappa)
+
+A IA **sugere**; o pesquisador **decide** — e o processo fica registrado:
+
+```bash
+python cli.py validar resultados/ --ia        # ou a seção "✅ Validação" no app
+```
+
+1. **Revisão dos nomes:** para cada classe, aceite (Enter), edite (digite) ou rejeite (`-`)
+   o nome sugerido. Registra-se a taxa de aceitação.
+2. **Atribuição às cegas:** 5 segmentos por classe são sorteados — *fora* dos que foram
+   mostrados à IA — e você indica a classe que melhor descreve cada um, sem ver a classe
+   da CHD. Com `--ia`, o modelo faz o mesmo teste (temperatura 0).
+3. **Concordância:** kappa de Cohen para pesquisador × CHD, IA × CHD e pesquisador × IA,
+   com interpretação de Landis e Koch (1977) e matrizes de confusão.
+
+Saídas: `validacao.docx` / `validacao.md` (com um parágrafo pronto para a seção de método)
+e `validacao.json` (todas as respostas, para auditoria).
+
+As respostas da IA usam **saída estruturada** (JSON Schema no Ollama ≥ 0.5; em versões
+antigas, recua para `format="json"`).
+
 ## Linha de comando (sem clicar, em lote)
 
 ```bash
@@ -193,6 +216,7 @@ python test_traducao_e_correcoes.py
 python test_cli.py
 python test_limpeza_transcricao.py
 python test_analises.py
+python test_validacao.py
 ```
 
 Os testes rodam automaticamente no GitHub Actions a cada envio.

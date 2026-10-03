@@ -182,6 +182,11 @@ class RainetteBridge:
                     selected.append(text)
         return selected
 
+    def get_segments(self) -> List[Tuple[str, int]]:
+        """Todos os segmentos de texto com a classe da CHD (0 = não classificado)."""
+        texts = [str(t).strip() for t in ro.r["segment_texts"]]
+        return list(zip(texts, self.groups))
+
     def get_matrix(self):
         """Matriz segmentos × formas (a mesma usada na CHD) + classe de cada segmento."""
         from scipy import sparse

@@ -93,6 +93,7 @@ class PipelineResult:
     finished_at: str = ""
     warnings: List[str] = field(default_factory=list)
     matrix: Any = None                     # analises.CorpusMatrix
+    all_segments: List[Any] = field(default_factory=list)  # (texto, classe) de todos os segmentos
     dendrogram_png: Optional[bytes] = None
     analysis: Any = None                   # analises.AnalysisOutput (preenchido em write_outputs)
 
@@ -180,6 +181,11 @@ def run_pipeline(
         seed=config.seed,
     )
     result.sizes = bridge.get_group_sizes()
+    if hasattr(bridge, "get_segments"):
+        try:
+            result.all_segments = list(bridge.get_segments())
+        except Exception as e:
+            result.warnings.append(f"Segmentos para validação indisponíveis: {e}")
     if config.analyses and hasattr(bridge, "get_matrix"):
         try:
             result.matrix = bridge.get_matrix()
@@ -377,6 +383,7 @@ def write_outputs(result: PipelineResult, out_dir: str | Path) -> List[Path]:
             }
             for cid, data in result.classes.items()
         ],
+        "todos_segmentos": [{"texto": t, "classe": int(c)} for t, c in result.all_segments],
     }
     write("classes.json", json.dumps(payload, ensure_ascii=False, indent=2))
 

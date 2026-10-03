@@ -416,6 +416,10 @@ if run_btn:
         progress.progress(55, text="CHD concluída. Extraindo resultados…")
         st.session_state["classes"] = classes
         st.session_state["sizes"] = sizes
+        st.session_state["all_segments"] = (
+            bridge.get_segments() if hasattr(bridge, "get_segments") else []
+        )
+        st.session_state.pop("validation", None)  # nova análise → nova validação
         st.session_state["k"] = k
 
     except ImportError as e:
@@ -563,6 +567,106 @@ for tab, (cid, data) in zip(tabs, classes.items()):
             descricao=interp.get("descricao", ""),
             resumo=interp.get("resumo", ""),
         )
+
+# ---------------------------------------------------------------------------
+# Validação humana (nomes + atribuição às cegas + kappa)
+# ---------------------------------------------------------------------------
+
+def render_validation_panel(classes, interpretations) -> None:
+    from validacao import (
+        NONE_LABEL, ValidationSession, assign_with_ai, build_docx as validation_docx,
+        build_markdown, decide_name, sample_items,
+    )
+
+    st.divider()
+    st.subheader("✅ Validação das classes")
+    st.caption(
+        "1) Revise os nomes sugeridos pela IA. 2) Atribua às cegas segmentos sorteados "
+        "(não mostrados à IA) à classe que melhor os descreve. O app mede a concordância "
+        "com a CHD (kappa de Cohen) — um registro de rigor para o método do trabalho."
+    )
+    if "validation" not in st.session_state:
+        session = ValidationSession()
+        shown = []
+        for cid, data in classes.items():
+            interp = interpretations.get(cid, {})
+            ai_name = interp.get("nome", f"Classe {cid}")
+            session.names.append(decide_name(cid, ai_name, ""))
+            session.descriptions[cid] = interp.get("descricao", "")
+            shown += data.get("segments", [])
+        segments = st.session_state.get("all_segments") or []
+        if not segments:
+            segments = [(t, cid) for cid, d in classes.items() for t in d.get("segments", [])]
+            shown = []
+        session.items = sample_items(segments, exclude=shown, per_class=5)
+        st.session_state["validation"] = session
+    session = st.session_state["validation"]
+
+    with st.form("val_nomes"):
+        st.markdown("**Etapa 1 — Nomes das classes** (deixe igual para aceitar; `-` para rejeitar)")
+        novos = {}
+        for d in session.names:
+            novos[d.class_id] = st.text_input(
+                f"Classe {d.class_id} — sugestão da IA: {d.ai_name}",
+                value=d.final_name if d.decision != "rejeitado" else "-",
+                key=f"val_nome_{d.class_id}",
+            )
+        if st.form_submit_button("Salvar nomes"):
+            session.names = [decide_name(d.class_id, d.ai_name, novos[d.class_id]) for d in session.names]
+
+    names = session.final_names()
+    options = [NONE_LABEL] + sorted(names)
+    fmt = lambda c: "nenhuma / não sei" if c == NONE_LABEL else f"{c}. {names[c]}"
+    with st.form("val_itens"):
+        st.markdown(f"**Etapa 2 — Atribuição às cegas** ({len(session.items)} segmentos)")
+        escolhas = {}
+        for it in session.items:
+            st.markdown(f"> {it.text}")
+            escolhas[it.item_id] = st.selectbox(
+                "Classe que melhor descreve o segmento", options, format_func=fmt,
+                index=options.index(it.human) if it.human in options else None,
+                key=f"val_item_{it.item_id}", label_visibility="collapsed",
+                placeholder="Escolha…",
+            )
+        if st.form_submit_button("Salvar atribuições"):
+            for it in session.items:
+                it.human = escolhas[it.item_id]
+
+    c1, c2 = st.columns(2)
+    if c1.button("🤖 IA também classifica (às cegas)", disabled=not use_llm):
+        from llm_interpreter import ClassInterpreter
+
+        interpreter = ClassInterpreter(model=model, use_cache=False, mock=use_mock)
+        session.ai_model = interpreter.model_key
+        with st.spinner("IA classificando…"):
+            assign_with_ai(session, interpreter.atribuir_segmento)
+    answered = sum(it.human is not None for it in session.items)
+    c2.caption(f"{answered}/{len(session.items)} segmentos atribuídos por você.")
+
+    agreements = session.agreements()
+    if agreements:
+        cols = st.columns(len(agreements))
+        for col, (key, ag) in zip(cols, agreements.items()):
+            k = "—" if ag.kappa is None else f"{ag.kappa:.2f}"
+            col.metric(f"κ {key}", k, help=f"{ag.interpretation}; concordância {100 * ag.observed:.0f}% (n={ag.n})")
+            col.caption(f"{ag.interpretation} · {100 * ag.observed:.0f}% · n={ag.n}")
+        acc = session.acceptance()
+        st.caption(f"Nomes: {acc['aceito']} aceitos, {acc['editado']} editados, {acc['rejeitado']} rejeitados.")
+        with st.expander("Matrizes de confusão e texto para o método"):
+            st.markdown(build_markdown(session))
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            docx_bytes = validation_docx(session, Path(tmp) / "v.docx").read_bytes()
+        d1, d2 = st.columns(2)
+        d1.download_button("⬇️ validacao.docx", docx_bytes, file_name="validacao.docx",
+                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        d2.download_button("⬇️ validacao.json", session.to_json().encode("utf-8"),
+                           file_name="validacao.json", mime="application/json")
+
+
+render_validation_panel(classes, interpretations)
 
 # Comparação opcional
 if use_llm and len(classes) >= 2 and interpretations:

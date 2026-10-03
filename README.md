@@ -17,6 +17,8 @@ Interface moderna para **Classificação Hierárquica Descendante** (método Rei
 | Arquivo | Função |
 |---------|--------|
 | `app.py` | App completo (corpus → CHD → LLM) |
+| `cli.py` | Linha de comando: `run`, `traduzir`, `config-exemplo` |
+| `pipeline.py` | Pipeline sem interface + relatório/JSON/CSV |
 | `app_demo.py` | Demo só do módulo de interpretação |
 | `llm_interpreter.py` | LLM + cache SQLite + TTL + mock |
 | `rainette_bridge.py` | Ponte Python ↔ rainette (R) |
@@ -50,10 +52,51 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 # para CHD completo:
-pip install rpy2
+pip install -r requirements-r.txt
 ```
 
-## Executar
+## Executar com Docker (recomendado)
+
+Tudo pronto — R, rainette, Python e Ollama — sem instalar nada além do Docker:
+
+```bash
+docker compose up -d
+docker compose exec ollama ollama pull qwen2.5:7b   # só na primeira vez
+# abra http://localhost:8501
+```
+
+Linha de comando dentro do Docker (coloque os arquivos na pasta `dados/`):
+
+```bash
+docker compose run --rm textome python cli.py run dados/corpus.txt --saida dados/resultados
+```
+
+## Linha de comando (sem clicar, em lote)
+
+```bash
+python cli.py config-exemplo > pesquisa.yaml        # gera a configuração comentada
+python cli.py run corpus.txt --config pesquisa.yaml --saida resultados/
+python cli.py run pasta_com_txts/ --k 6              # um subdiretório de resultado por arquivo
+python cli.py traduzir entrevistas_en.txt --saida traduzidos/   # só tradução
+```
+
+Opções úteis: `--modelo`, `--k`, `--idioma-origem`, `--sem-traducao`, `--sem-llm`,
+`--profunda`, `--forcar` (ignora o cache), `--mock` (teste sem Ollama).
+A linha de comando sobrepõe o YAML. Em lote, um arquivo com erro não interrompe os demais.
+
+Arquivos gerados em cada pasta de resultado:
+
+| Arquivo | Conteúdo |
+|---------|----------|
+| `relatorio.md` | Seção de **método pronta para citar** + classes, formas (χ²), segmentos e interpretações |
+| `classes.json` | Todos os resultados, para outras análises |
+| `formas.csv` | Formas por classe (separado por `;`, abre direto no Excel) |
+| `corpus_pt.txt` | Corpus traduzido no formato IRaMuTeQ, com `*lang_xx` |
+| `config_usada.yaml` | Parâmetros exatos usados (reprodutibilidade) |
+
+O endereço do Ollama vem da variável `OLLAMA_HOST` (padrão `http://localhost:11434`).
+
+## Executar a interface sem Docker
 
 ```bash
 # App completo
@@ -76,7 +119,10 @@ Na sidebar do `app.py`:
 python test_cache.py
 python test_e2e_mock.py
 python test_traducao_e_correcoes.py
+python test_cli.py
 ```
+
+Os testes rodam automaticamente no GitHub Actions a cada envio.
 
 ## Tradução
 

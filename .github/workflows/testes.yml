@@ -1,0 +1,23 @@
+name: Testes
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Testes (sem R e sem Ollama)
+        run: |
+          python test_cache.py
+          python test_e2e_mock.py
+          python test_traducao_e_correcoes.py
+          python test_cli.py
+      - name: Linha de comando (fumaça)
+        run: python cli.py config-exemplo

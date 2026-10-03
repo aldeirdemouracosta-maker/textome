@@ -1,0 +1,37 @@
+# docker compose up -d
+# docker compose exec ollama ollama pull qwen2.5:7b      (uma vez)
+# App: http://localhost:8501
+#
+# Linha de comando, com os arquivos da pasta ./dados:
+# docker compose run --rm textome python cli.py run dados/corpus.txt --saida dados/resultados
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    # GPU NVIDIA (opcional): descomente
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  textome:
+    build: .
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./dados:/app/dados
+      - cache:/app/.cache
+
+volumes:
+  ollama:
+  cache:

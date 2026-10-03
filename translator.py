@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from llm_interpreter import make_client, strip_thinking
+from llm_interpreter import DEFAULT_HOST, make_client, strip_thinking
 
 LANGUAGE_NAMES: Dict[str, str] = {
     "pt": "português",
@@ -35,22 +35,24 @@ _STOPWORDS: Dict[str, set] = {
     "en": set("the and of to is in that it for was with are this be on have not "
               "they by from you which an or at but has were their".split()),
     "es": set("el los las y del es una por con para pero más también muy sus fue "
-              "hay este cuando ya en un al lo se está están su que de la como mejor puede".split()),
+              "hay este cuando ya en un al lo se está están su que de la como mejor puede no "
+              "tienen tiene son sin entre nosotros ellos usted esto eso".split()),
     "fr": set("le les des et est une pas dans que pour qui sur avec ce il sont au "
               "du nous ne vous un la aux ces cette leur que de".split()),
     "de": set("der die und das ist nicht ein eine zu den mit von sich auch auf für "
-              "im dem wir ich werden wird sind".split()),
+              "im dem wir ich werden wird sind er sie wurde hat haben bin letztes".split()),
     "it": set("il di che è per non sono gli del della con anche più nel ma ci "
-              "questo come degli un una le nella alla".split()),
+              "questo come degli un una le nella alla molto mia mio si ho ha hanno sul nelle "
+              "dei delle miei".split()),
 }
 
 # Terminações/letras características (peso extra por palavra).
 _HINTS: Dict[str, re.Pattern] = {
     "pt": re.compile(r"(ção|ções|ão|ões|ã|õ|nh|lh|ência$|ância$|dade$)"),
-    "es": re.compile(r"(ción|ciones|ñ|¿|¡|encia$|dad$)"),
+    "es": re.compile(r"(ción|ciones|ñ|¿|¡|encia$|dad$|ie|(?<!q)ue)"),
     "fr": re.compile(r"(eau|aux$|è|oi|ou$|ë)"),
-    "de": re.compile(r"(ß|ä|ö|ü|sch|ung$|keit$)"),
-    "it": re.compile(r"(zione|zioni|gli|zz|ò|ì)"),
+    "de": re.compile(r"(ß|ä|ö|ü|sch|ung$|keit$|tz|cht)"),
+    "it": re.compile(r"(zione|zioni|gli|zz|ò|ì|iamo$|cch|ggi|tt)"),
     "en": re.compile(r"(th|ing$|ly$)"),
 }
 
@@ -120,7 +122,7 @@ class CorpusTranslator:
     def __init__(
         self,
         model: str = "qwen2.5:7b",
-        host: str = "http://localhost:11434",
+        host: str = DEFAULT_HOST,
         db_path: str | Path = ".cache/interpretations.db",
         use_cache: bool = True,
         mock: bool = False,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from contextlib import contextmanager
@@ -20,6 +21,9 @@ try:
     import ollama
 except ImportError:
     ollama = None  # type: ignore
+
+# Endereço do Ollama: variável OLLAMA_HOST (ex.: no Docker) ou localhost.
+DEFAULT_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
 # Sentinela: "usar o TTL padrão". None significa "sem expiração".
 USE_DEFAULT_TTL: Any = object()
@@ -291,7 +295,7 @@ class LLMInterpreter:
         self,
         model: str = "qwen3:8b",
         temperature: float = 0.3,
-        host: str = "http://localhost:11434",
+        host: str = DEFAULT_HOST,
         db_path: str | Path = ".cache/interpretations.db",
         use_cache: bool = True,
         default_ttl_hours: Optional[int] = 168,
@@ -513,7 +517,7 @@ def strip_thinking(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
 
 
-def make_client(host: str = "http://localhost:11434", mock: bool = False):
+def make_client(host: str = DEFAULT_HOST, mock: bool = False):
     """Cliente Ollama real, ou o mock quando pedido explicitamente."""
     if mock:
         return MockOllamaClient()
@@ -531,7 +535,7 @@ def _model_name(entry: Any) -> Optional[str]:
     return None
 
 
-def list_available_models(host: str = "http://localhost:11434") -> List[str]:
+def list_available_models(host: str = DEFAULT_HOST) -> List[str]:
     if ollama is None:
         return []
     try:
@@ -609,7 +613,7 @@ def enable_mock_ollama() -> None:
     global ollama
 
     class _FakeOllamaModule:
-        Client = lambda host="http://localhost:11434": MockOllamaClient()
+        Client = lambda host=DEFAULT_HOST: MockOllamaClient()
 
     ollama = _FakeOllamaModule  # type: ignore
 

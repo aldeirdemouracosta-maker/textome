@@ -4,7 +4,7 @@ Textome / Textome
 """
 
 import streamlit as st
-from llm_interpreter import LLMInterpreter, list_available_models
+from llm_interpreter import DEFAULT_HOST, LLMInterpreter, list_available_models
 
 st.set_page_config(
     page_title="Textome – Interpretação LLM",
@@ -26,7 +26,7 @@ with st.sidebar:
         model = st.selectbox("Modelo Ollama", available, index=0)
     else:
         model = st.text_input("Modelo Ollama", value="qwen3:8b")
-        st.warning("Ollama não detectado em localhost:11434")
+        st.warning(f"Ollama não detectado em {DEFAULT_HOST}")
 
     temperature = st.slider("Temperature", 0.0, 1.0, 0.3, 0.05)
     deep = st.checkbox("Interpretação aprofundada", value=False)

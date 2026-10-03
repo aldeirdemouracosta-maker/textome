@@ -1,0 +1,3 @@
+# Necessários só para a CHD (precisam de R com quanteda e rainette instalados)
+rpy2>=3.5
+pandas>=2

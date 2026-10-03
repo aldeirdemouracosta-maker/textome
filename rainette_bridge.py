@@ -64,6 +64,7 @@ class RainetteBridge:
         language: str = "pt",
         min_docfreq: int = 5,
         n_terms: int = 20,
+        seed: int = 42,
     ) -> Dict[int, Dict[str, Any]]:
         """
         Pipeline completo de classificação.
@@ -86,6 +87,7 @@ class RainetteBridge:
         r_code = f"""
         library(quanteda)
         library(rainette)
+        set.seed({int(seed)})
 
         corp <- corpus(texts_py)
         corp <- split_segments(corp, segment_size = {int(segment_size)})

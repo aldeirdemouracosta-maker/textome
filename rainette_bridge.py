@@ -7,6 +7,8 @@ Executa CHD (método Reinert) e extrai formas + segmentos por classe.
 from __future__ import annotations
 
 from collections import Counter
+
+import numpy as np
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
@@ -129,7 +131,11 @@ class RainetteBridge:
         self.res = ro.r["res"]
         self.dtm = ro.r["dtm"]
         self.corpus = ro.r["corp"]
-        self.groups = [int(g) for g in list(ro.r["groups"])]
+        # Segmentos não classificados vêm como NA do R → 0
+        self.groups = [
+            int(g) if g is not None and int(g) > 0 else 0  # NA_integer_ é negativo
+            for g in list(ro.r["groups"])
+        ]
 
         return self._extract_classes(n_terms=n_terms)
 
@@ -176,6 +182,48 @@ class RainetteBridge:
                     selected.append(text)
         return selected
 
+    def get_matrix(self):
+        """Matriz segmentos × formas (a mesma usada na CHD) + classe de cada segmento."""
+        from scipy import sparse
+
+        from analises import CorpusMatrix
+
+        ro.r("""
+        dtm_t <- as(as(dtm, "CsparseMatrix"), "TsparseMatrix")
+        dtm_i <- dtm_t@i
+        dtm_j <- dtm_t@j
+        dtm_x <- dtm_t@x
+        dtm_feat <- featnames(dtm)
+        dtm_dim <- dim(dtm)
+        """)
+        i = np.asarray(ro.r["dtm_i"], dtype=int)
+        j = np.asarray(ro.r["dtm_j"], dtype=int)
+        x = np.asarray(ro.r["dtm_x"], dtype=float)
+        n_docs, n_terms = (int(v) for v in ro.r["dtm_dim"])
+        counts = sparse.csr_matrix((x, (i, j)), shape=(n_docs, n_terms))
+        terms = [str(t) for t in ro.r["dtm_feat"]]
+        groups = [g if isinstance(g, int) and g > 0 else 0 for g in self.groups]
+        return CorpusMatrix(counts, terms, groups)
+
+    def save_dendrogram(self, path: str, n_terms: int = 15) -> Optional[str]:
+        """Salva o dendrograma do rainette (PNG). Retorna None ou a mensagem de erro."""
+        ro.globalenv["dendro_path"] = ro.StrVector([str(path)])
+        try:
+            ro.r(f"""
+            p <- rainette_plot(res, dtm, k = {int(self.k)}, n_terms = {int(n_terms)},
+                               measure = "chi2", show_negative = FALSE)
+            png(dendro_path, width = 2400, height = 1500, res = 200)
+            if (inherits(p, "ggplot")) print(p) else grid::grid.draw(p)
+            invisible(dev.off())
+            """)
+            return None
+        except RRuntimeError as e:
+            try:
+                ro.r("if (dev.cur() > 1) invisible(dev.off())")
+            except Exception:
+                pass
+            return str(e)
+
     def get_group_sizes(self) -> Dict[int, int]:
         counts = Counter(self.groups)
-        return {int(k): v for k, v in counts.items() if k is not None}
+        return {int(k): v for k, v in counts.items() if k}

@@ -20,6 +20,7 @@ jobs:
           python test_traducao_e_correcoes.py
           python test_cli.py
           python test_limpeza_transcricao.py
+          python test_analises.py
       - name: Linha de comando (fumaça)
         run: python cli.py config-exemplo
 
@@ -59,6 +60,10 @@ jobs:
           docker run --rm -v "$PWD/saida:/saida" textome \
             python cli.py run exemplos/corpus_demo.txt --mock --k 4 --saida /saida
           cat saida/relatorio.md
+          ls -la saida/figuras
+          test -s saida/figuras/dendrograma.png   # dendrograma real do rainette
+          test -s saida/figuras/afc.png
+          test -s saida/relatorio.docx
       - uses: actions/upload-artifact@v4
         if: always()
         with:

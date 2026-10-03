@@ -19,6 +19,8 @@ Interface moderna para **Classificação Hierárquica Descendante** (método Rei
 | `app.py` | App completo (corpus → CHD → LLM) |
 | `cli.py` | Linha de comando: `run`, `traduzir`, `config-exemplo` |
 | `pipeline.py` | Pipeline sem interface + relatório/JSON/CSV |
+| `analises.py` | Estatísticas, AFC, similitude, nuvem e figuras |
+| `relatorio_docx.py` | Relatório Word |
 | `limpeza.py` | Limpeza IRaMuTeQ, validação de cabeçalhos, planilha → corpus |
 | `transcricao.py` | Áudio → texto com Whisper local (faster-whisper) |
 | `app_demo.py` | Demo só do módulo de interpretação |
@@ -121,6 +123,23 @@ python cli.py transcrever audios/ --variaveis participantes.csv --saida corpus_e
 - O modelo é baixado uma vez na primeira execução; depois tudo roda offline.
 - **Revise a transcrição** antes da análise. O Whisper não separa entrevistador e entrevistado: remova as perguntas do entrevistador se elas não devem entrar no corpus.
 
+## Análises complementares (estilo IRaMuTeQ)
+
+Geradas automaticamente após a CHD (`analyses: true` no YAML):
+
+| Análise | O que mostra |
+|---|---|
+| Estatísticas textuais | segmentos, % classificado, ocorrências, formas, hápax |
+| Dendrograma | árvore da CHD com as formas de maior χ² por classe (gerado pelo rainette) |
+| Distribuição das classes | % de segmentos por classe |
+| AFC | formas características no plano fatorial 1×2 (exige ≥ 3 classes) |
+| Similitude | árvore máxima de coocorrência das 50 formas mais frequentes; cor = classe em que a forma é mais característica, tamanho = frequência |
+| Nuvem de palavras | formas mais frequentes do corpus |
+
+Cada classe tem sempre a mesma cor em todos os gráficos (paleta validada para daltonismo,
+com marcadores diferentes como segunda pista). Rótulos que não cabem sem sobreposição
+são omitidos e a figura informa quantos — a lista completa está em `classes.json`.
+
 ## Linha de comando (sem clicar, em lote)
 
 ```bash
@@ -138,7 +157,9 @@ Arquivos gerados em cada pasta de resultado:
 
 | Arquivo | Conteúdo |
 |---------|----------|
-| `relatorio.md` | Seção de **método pronta para citar** + classes, formas (χ²), segmentos e interpretações |
+| `relatorio.docx` | **Relatório Word** pronto para o capítulo de resultados: método, estatísticas textuais, figuras numeradas com legenda e fonte, uma seção por classe (para PDF: "Salvar como PDF" no Word/LibreOffice) |
+| `relatorio.md` | O mesmo conteúdo em Markdown |
+| `figuras/` | `dendrograma.png` (rainette), `classes.png`, `afc.png`, `similitude.png`, `nuvem.png` (200 dpi) |
 | `classes.json` | Todos os resultados, para outras análises |
 | `formas.csv` | Formas por classe (separado por `;`, abre direto no Excel) |
 | `corpus_final.txt` | Corpus **exatamente como foi analisado** (traduzido e limpo), no formato IRaMuTeQ, com `*lang_xx` |
@@ -171,6 +192,7 @@ python test_e2e_mock.py
 python test_traducao_e_correcoes.py
 python test_cli.py
 python test_limpeza_transcricao.py
+python test_analises.py
 ```
 
 Os testes rodam automaticamente no GitHub Actions a cada envio.

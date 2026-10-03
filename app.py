@@ -93,6 +93,10 @@ with st.sidebar:
     )
     temperature = st.slider("Temperatura do LLM", 0.0, 1.0, 0.3, 0.05)
     deep_interp = st.checkbox("Interpretação aprofundada", value=False)
+    run_analyses = st.checkbox(
+        "AFC, similitude, nuvem e relatório Word", value=True,
+        help="Análises complementares no estilo do IRaMuTeQ + relatório .docx para download.",
+    )
     use_cache = st.checkbox("Usar cache SQLite", value=True)
     force_refresh = st.checkbox("Forçar nova geração (ignorar cache)", value=False)
 
@@ -275,6 +279,80 @@ def render_final_corpus_panel() -> None:
         st.code(corpus_final[:3000] + ("\n…" if len(corpus_final) > 3000 else ""), language=None)
 
 
+def build_analysis_bundle(bridge, docs, final_docs, cleaning_report, classes, sizes, interpretations):
+    """Roda as análises do pipeline e devolve figuras, estatísticas e o .docx em memória."""
+    import tempfile
+    from pathlib import Path
+
+    from analises import FIGURE_TITLES
+    from pipeline import Config, PipelineResult, run_pipeline, write_outputs
+
+    cfg = Config(
+        k=k, segment_size=segment_size, min_segment_size=min_segment_size,
+        min_docfreq=min_docfreq, language=language, translate=translate_pt,
+        source_lang=source_lang, use_llm=use_llm, model=model, temperature=temperature,
+        deep=deep_interp, mock=use_mock, use_cache=use_cache, clean=clean_corpus,
+        compound_terms=compound_terms,
+    )
+    translation = st.session_state.get("translation")
+    result = PipelineResult(
+        config=cfg, source_name=getattr(uploaded, "name", None) or "corpus_demonstracao",
+        documents=docs, texts=[d.text for d in final_docs], final_documents=final_docs,
+        cleaning=cleaning_report, translations=translation["results"] if translation else [],
+        classes=classes, sizes=sizes, interpretations=interpretations,
+        finished_at=__import__("datetime").datetime.now().isoformat(timespec="seconds"),
+    )
+    result.matrix = bridge.get_matrix()
+    with tempfile.TemporaryDirectory() as tmp:
+        png = Path(tmp) / "d.png"
+        err = bridge.save_dendrogram(str(png))
+        if err is None and png.exists():
+            result.dendrogram_png = png.read_bytes()
+        else:
+            result.warnings.append(f"Dendrograma não gerado: {err}")
+        out = Path(tmp) / "saida"
+        write_outputs(result, out)
+        figures = {
+            FIGURE_TITLES.get(key, key): path.read_bytes()
+            for key, path in (result.analysis.figures.items() if result.analysis else [])
+        }
+        return {
+            "figures": figures,
+            "stats": result.analysis.stats if result.analysis else None,
+            "docx": (out / "relatorio.docx").read_bytes() if (out / "relatorio.docx").exists() else None,
+            "warnings": result.warnings,
+        }
+
+
+def render_analysis_panel() -> None:
+    bundle = st.session_state.get("analysis")
+    if not bundle:
+        return
+    st.subheader("📈 Análises complementares")
+    stats = bundle.get("stats")
+    if stats:
+        c = st.columns(5)
+        c[0].metric("Segmentos", stats.segments)
+        c[1].metric("Classificados", f"{stats.classified_pct:.0f}%")
+        c[2].metric("Ocorrências", stats.occurrences)
+        c[3].metric("Formas", stats.forms)
+        c[4].metric("Hápax", stats.hapax)
+    if bundle.get("docx"):
+        st.download_button(
+            "⬇️ Baixar relatório Word (.docx)", data=bundle["docx"], file_name="relatorio_textome.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    figures = bundle.get("figures", {})
+    if figures:
+        tabs = st.tabs(list(figures))
+        for tab, (title, data) in zip(tabs, figures.items()):
+            with tab:
+                st.image(data, caption=title)
+    for w in bundle.get("warnings", []):
+        st.caption(f"⚠ {w}")
+    st.divider()
+
+
 if translate_btn:
     docs = load_corpus()
     progress = st.progress(0, text="Traduzindo…")
@@ -301,8 +379,10 @@ if run_btn:
 
     # --- Limpeza (regras do IRaMuTeQ) ---
     final_docs = [Document(t, h) for t, h in zip(texts, headers)]
+    cleaning_report = None
     if clean_corpus:
         final_docs, report = clean_documents(final_docs, compound_terms)
+        cleaning_report = report
         st.session_state["cleaning"] = report.summary_lines()
         if not final_docs:
             st.error("Nenhum texto restou após a limpeza.")
@@ -411,6 +491,17 @@ if run_btn:
     else:
         st.session_state["interpretations"] = {}
 
+    # --- Análises complementares + relatório Word ---
+    st.session_state.pop("analysis", None)
+    if run_analyses:
+        progress.progress(97, text="AFC, similitude, nuvem e relatório…")
+        try:
+            st.session_state["analysis"] = build_analysis_bundle(
+                bridge, docs, final_docs, cleaning_report, classes, sizes, interpretations,
+            )
+        except Exception as e:
+            st.warning(f"Análises complementares falharam: {type(e).__name__}: {e}")
+
     progress.progress(100, text="Concluído")
     status.success("Análise finalizada.")
     progress.empty()
@@ -453,6 +544,8 @@ for i, (cid, data) in enumerate(classes.items()):
         st.metric(label=label[:40], value=f"{n_seg} seg.")
 
 st.divider()
+
+render_analysis_panel()
 
 # Cards por classe
 from llm_interpreter import render_class_card

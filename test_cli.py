@@ -74,7 +74,7 @@ def test_run_completo_com_traducao():
         out = tmp / "out"
         nomes = sorted(p.name for p in out.iterdir())
         assert nomes == ["classes.json", "config_usada.yaml", "corpus_final.txt",
-                         "formas.csv", "relatorio.md"], nomes
+                         "formas.csv", "relatorio.docx", "relatorio.md"], nomes
 
         dados = json.loads((out / "classes.json").read_text(encoding="utf-8"))
         assert [c["id"] for c in dados["classes"]] == [1, 2, 3]

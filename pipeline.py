@@ -36,6 +36,8 @@ class Config:
     # Limpeza (regras do IRaMuTeQ)
     clean: bool = True
     compound_terms: List[str] = field(default_factory=list)  # ex.: "sistema único de saúde"
+    # Análises complementares (AFC, similitude, nuvem, dendrograma) e relatório Word
+    analyses: bool = True
     # Tradução
     translate: bool = True
     source_lang: str = "auto"
@@ -90,6 +92,9 @@ class PipelineResult:
     started_at: str = ""
     finished_at: str = ""
     warnings: List[str] = field(default_factory=list)
+    matrix: Any = None                     # analises.CorpusMatrix
+    dendrogram_png: Optional[bytes] = None
+    analysis: Any = None                   # analises.AnalysisOutput (preenchido em write_outputs)
 
 
 Log = Callable[[str], None]
@@ -175,6 +180,21 @@ def run_pipeline(
         seed=config.seed,
     )
     result.sizes = bridge.get_group_sizes()
+    if config.analyses and hasattr(bridge, "get_matrix"):
+        try:
+            result.matrix = bridge.get_matrix()
+        except Exception as e:  # análises são complementares: não derrubam a CHD
+            result.warnings.append(f"Matriz para AFC/similitude indisponível: {e}")
+        if hasattr(bridge, "save_dendrogram"):
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as tmp:
+                png = Path(tmp) / "dendrograma.png"
+                err = bridge.save_dendrogram(str(png))
+                if err is None and png.exists():
+                    result.dendrogram_png = png.read_bytes()
+                else:
+                    result.warnings.append(f"Dendrograma não gerado: {err}")
     empty = [cid for cid, data in result.classes.items() if not data.get("segments")]
     if empty:
         result.warnings.append(
@@ -208,8 +228,52 @@ def _class_name(result: PipelineResult, cid: int) -> str:
     return result.interpretations.get(cid, {}).get("nome") or f"Classe {cid}"
 
 
-def build_report(result: PipelineResult) -> str:
+def method_items(result: PipelineResult) -> List[str]:
+    """Itens da seção de método (markdown leve: `código` e **negrito**)."""
     cfg = result.config
+    items = [f"Corpus: {len(result.documents)} documento(s)."]
+    if cfg.translate and result.translations:
+        n = sum(r.translated for r in result.translations)
+        idiomas = ", ".join(
+            f"{LANGUAGE_NAMES.get(k, k)} ({v})"
+            for k, v in language_summary(result.translations).items()
+        )
+        items.append(
+            f"Tradução automática para o português de {n} documento(s) com o modelo "
+            f"local `{cfg.model}` (temperatura 0). Idiomas de origem: {idiomas}."
+        )
+    if cfg.clean and result.cleaning is not None:
+        detalhes = ", ".join(f"{r} ({n})" for r, n in result.cleaning.changes.most_common())
+        items.append(
+            "Corpus preparado segundo as regras do IRaMuTeQ (remoção de aspas e "
+            "caracteres especiais, hífens e expressões compostas unidas por \"_\")"
+            + (f": {detalhes}." if detalhes else "; nenhuma alteração necessária.")
+        )
+        if cfg.compound_terms:
+            items.append(f"Expressões compostas definidas: {', '.join(cfg.compound_terms)}.")
+    items.append(
+        f"Classificação Hierárquica Descendente (método Reinert) com o pacote R rainette: "
+        f"k = {cfg.k}, segmentos de ~{cfg.segment_size} palavras, mínimo de "
+        f"{cfg.min_segment_size} formas por segmento, frequência mínima {cfg.min_docfreq}, "
+        f"semente {cfg.seed}."
+    )
+    if result.analysis is not None:
+        items.append(
+            "Análises complementares: análise fatorial de correspondência (AFC) da tabela "
+            "classes × formas, análise de similitude (árvore máxima do grafo de coocorrência "
+            "das 50 formas mais frequentes) e nuvem de palavras."
+        )
+    if cfg.use_llm:
+        items.append(
+            f"Nomes e resumos das classes sugeridos pelo modelo `{cfg.model}` "
+            f"(temperatura {cfg.temperature}) e revisados pelo pesquisador."
+            + (" **Atenção: modo simulado (mock).**" if cfg.mock else "")
+        )
+    items.append(f"Software: Textome, Python {platform.python_version()}.")
+    return items
+
+
+def build_report(result: PipelineResult) -> str:
     total = sum(result.sizes.values()) or 1
     lines = [
         f"# Relatório Textome — {result.source_name}",
@@ -218,43 +282,28 @@ def build_report(result: PipelineResult) -> str:
         "",
         "## Método (para citar no trabalho)",
         "",
-        f"- Corpus: {len(result.documents)} documento(s).",
-    ]
-    if cfg.translate and result.translations:
-        n = sum(r.translated for r in result.translations)
-        idiomas = ", ".join(
-            f"{LANGUAGE_NAMES.get(k, k)} ({v})"
-            for k, v in language_summary(result.translations).items()
-        )
-        lines.append(
-            f"- Tradução automática para o português de {n} documento(s) com o modelo "
-            f"local `{cfg.model}` (temperatura 0). Idiomas de origem: {idiomas}."
-        )
-    if cfg.clean and result.cleaning is not None:
-        detalhes = ", ".join(f"{r} ({n})" for r, n in result.cleaning.changes.most_common())
-        lines.append(
-            "- Corpus preparado segundo as regras do IRaMuTeQ (remoção de aspas e "
-            "caracteres especiais, hífens e expressões compostas unidas por \"_\")"
-            + (f": {detalhes}." if detalhes else "; nenhuma alteração necessária.")
-        )
-        if cfg.compound_terms:
-            lines.append(f"- Expressões compostas definidas: {', '.join(cfg.compound_terms)}.")
-    lines += [
-        f"- Classificação Hierárquica Descendente (método Reinert) com o pacote R rainette: "
-        f"k = {cfg.k}, segmentos de ~{cfg.segment_size} palavras, mínimo de "
-        f"{cfg.min_segment_size} formas por segmento, frequência mínima {cfg.min_docfreq}, "
-        f"semente {cfg.seed}.",
-    ]
-    if cfg.use_llm:
-        lines.append(
-            f"- Nomes e resumos das classes sugeridos pelo modelo `{cfg.model}` "
-            f"(temperatura {cfg.temperature}) e revisados pelo pesquisador."
-            + (" **Atenção: modo simulado (mock).**" if cfg.mock else "")
-        )
-    lines += [f"- Software: Textome, Python {platform.python_version()}.", ""]
+    ] + [f"- {item}" for item in method_items(result)] + [""]
 
     if result.warnings:
         lines += ["## Avisos", ""] + [f"- {w}" for w in result.warnings] + [""]
+
+    if result.analysis is not None:
+        from analises import FIGURE_TITLES
+
+        st = result.analysis.stats
+        lines += [
+            "## Estatísticas textuais",
+            "",
+            f"- Segmentos de texto: {st.segments}; classificados: {st.classified} "
+            f"({st.classified_pct:.1f}%)",
+            f"- Ocorrências: {st.occurrences}; formas distintas: {st.forms}; "
+            f"hápax: {st.hapax} ({st.hapax_pct_forms:.1f}% das formas)",
+            "",
+            "## Figuras",
+            "",
+        ]
+        for key, path in result.analysis.figures.items():
+            lines += [f"![{FIGURE_TITLES.get(key, key)}](figuras/{path.name})", ""]
 
     lines += ["## Classes", ""]
     for cid, data in result.classes.items():
@@ -293,6 +342,22 @@ def write_outputs(result: PipelineResult, out_dir: str | Path) -> List[Path]:
         path.write_text(content, encoding="utf-8")
         written.append(path)
 
+    if result.matrix is not None and result.config.analyses:
+        from analises import run_all
+
+        names = {cid: _class_name(result, cid) for cid in result.classes}
+        names = {cid: n for cid, n in names.items() if n != f"Classe {cid}"}
+        try:
+            result.analysis = run_all(
+                result.matrix, out / "figuras", result.sizes, names,
+                class_forms={cid: d.get("forms", []) for cid, d in result.classes.items()},
+                dendrogram_png=result.dendrogram_png, seed=result.config.seed,
+            )
+            result.warnings += result.analysis.warnings
+            written += list(result.analysis.figures.values())
+        except Exception as e:
+            result.warnings.append(f"Análises complementares falharam: {e}")
+
     write("relatorio.md", build_report(result))
     write("config_usada.yaml", result.config.to_yaml())
 
@@ -323,6 +388,13 @@ def write_outputs(result: PipelineResult, out_dir: str | Path) -> List[Path]:
             for f, c in data.get("forms", []):
                 writer.writerow([cid, _class_name(result, cid), f, f"{c:.3f}"])
     written.append(csv_path)
+
+    try:
+        from relatorio_docx import build_docx
+
+        written.append(build_docx(result, out / "relatorio.docx"))
+    except ImportError:
+        result.warnings.append("relatorio.docx não gerado: instale python-docx")
 
     # Corpus exatamente como foi analisado (traduzido e limpo), pronto para o IRaMuTeQ.
     write(

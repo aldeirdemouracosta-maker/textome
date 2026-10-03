@@ -69,11 +69,11 @@ def test_run_completo_com_traducao():
 
         texts, kwargs = bridge.calls[0]
         assert kwargs["k"] == 3 and kwargs["language"] == "pt" and kwargs["seed"] == 42
-        assert texts[0].startswith("[tradução simulada]") and texts[1].startswith("Os hospitais")
+        assert texts[0].startswith("tradução simulada") and texts[1].startswith("Os hospitais")
 
         out = tmp / "out"
         nomes = sorted(p.name for p in out.iterdir())
-        assert nomes == ["classes.json", "config_usada.yaml", "corpus_pt.txt",
+        assert nomes == ["classes.json", "config_usada.yaml", "corpus_final.txt",
                          "formas.csv", "relatorio.md"], nomes
 
         dados = json.loads((out / "classes.json").read_text(encoding="utf-8"))
@@ -82,9 +82,10 @@ def test_run_completo_com_traducao():
         assert dados["classes"][2]["interpretacao"] == {}, "classe vazia não vai ao LLM"
         assert dados["avisos"], "classe vazia gera aviso"
 
-        corpus_pt = (out / "corpus_pt.txt").read_text(encoding="utf-8")
-        assert "**** *suj_01 *pais_us *lang_en\n[tradução simulada]" in corpus_pt
-        assert "**** *suj_02 *pais_br *lang_pt\nOs hospitais" in corpus_pt
+        corpus_final = (out / "corpus_final.txt").read_text(encoding="utf-8")
+        # "[tradução simulada]" passa pela limpeza: colchetes viram espaço
+        assert "**** *suj_01 *pais_us *lang_en\ntradução simulada The hospitals" in corpus_final
+        assert "**** *suj_02 *pais_br *lang_pt\nOs hospitais" in corpus_final
 
         rel = (out / "relatorio.md").read_text(encoding="utf-8")
         assert "k = 3" in rel and "modo simulado" in rel and "| hospital | 12.3 |" in rel
@@ -116,7 +117,8 @@ def test_lote_de_pasta_continua_apos_erro():
         assert (tmp / "out" / "a" / "relatorio.md").exists()
         assert (tmp / "out" / "c" / "relatorio.md").exists()
         assert not (tmp / "out" / "b").exists()
-        assert not (tmp / "out" / "a" / "corpus_pt.txt").exists(), "sem tradução, sem corpus_pt"
+        final = (tmp / "out" / "a" / "corpus_final.txt").read_text(encoding="utf-8")
+        assert final.startswith("**** *doc_001\nPrimeiro texto.")
     print("OK test_lote_de_pasta_continua_apos_erro")
 
 

@@ -1,0 +1,2 @@
+# Transcrição de entrevistas (Whisper local). O modelo é baixado na 1ª execução.
+faster-whisper>=1.0

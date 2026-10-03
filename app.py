@@ -20,6 +20,7 @@ st.set_page_config(
 )
 
 from corpus import Document, load_documents_from_upload, to_iramuteq
+from limpeza import clean_documents
 from translator import LANGUAGE_NAMES
 
 # ---------------------------------------------------------------------------
@@ -66,6 +67,21 @@ with st.sidebar:
             format_func=lambda c: LANGUAGE_NAMES[c],
             index=0,
         )
+
+    st.markdown("### Limpeza do corpus")
+    clean_corpus = st.checkbox(
+        "Limpar segundo as regras do IRaMuTeQ",
+        value=True,
+        help="Remove aspas, emojis, URLs e caracteres especiais; troca hífens por _ "
+             "(guarda_chuva) e separa pronomes (disse me); corrige cabeçalhos ****.",
+    )
+    compound_raw = st.text_area(
+        "Expressões compostas (uma por linha)",
+        placeholder="sistema único de saúde\nbem estar",
+        help="Viram uma palavra só: sistema_único_de_saúde.",
+        disabled=not clean_corpus,
+    )
+    compound_terms = [t.strip() for t in compound_raw.splitlines() if t.strip()]
 
     st.markdown("### LLM local (Ollama)")
     model = st.text_input("Modelo Ollama", value="qwen2.5:7b")
@@ -202,6 +218,63 @@ def translate_docs(docs: list[Document], progress) -> list[str]:
     return [r.text for r in results]
 
 
+def render_translation_panel() -> None:
+    data = st.session_state.get("translation")
+    if not data:
+        return
+    results = data["results"]
+    n_translated = sum(r.translated for r in results)
+    resumo = ", ".join(
+        f"{LANGUAGE_NAMES.get(lang, lang)}: {qty}" for lang, qty in data["summary"].items()
+    )
+    st.subheader("🌐 Tradução para português")
+    st.caption(f"{n_translated} de {len(results)} texto(s) traduzido(s) · Idiomas detectados — {resumo}")
+
+    corpus_pt = to_iramuteq(
+        [r.text for r in results],
+        headers=data["headers"],
+        extra_vars=[f"*lang_{r.source_lang}" for r in results],
+    )
+    st.download_button(
+        "⬇️ Baixar corpus em português (formato IRaMuTeQ)",
+        data=corpus_pt.encode("utf-8"),
+        file_name="corpus_pt.txt",
+        mime="text/plain",
+    )
+    with st.expander("Ver original × tradução", expanded=False):
+        for i, r in enumerate(results, 1):
+            if not r.translated:
+                continue
+            st.markdown(f"**Texto {i}** · {LANGUAGE_NAMES.get(r.source_lang, r.source_lang)}"
+                        + (" · cache" if r.cached else ""))
+            c1, c2 = st.columns(2)
+            c1.caption("Original")
+            c1.write(r.original)
+            c2.caption("Português")
+            c2.write(r.text)
+    st.divider()
+
+
+
+def render_final_corpus_panel() -> None:
+    corpus_final = st.session_state.get("final_corpus")
+    if not corpus_final:
+        return
+    with st.expander("🧹 Corpus final (como foi analisado)", expanded=False):
+        cleaning = st.session_state.get("cleaning")
+        if cleaning:
+            st.markdown("**Limpeza aplicada:**\n" + "\n".join(f"- {c}" for c in cleaning))
+        elif cleaning is not None:
+            st.caption("Nenhuma alteração de limpeza foi necessária.")
+        st.download_button(
+            "⬇️ Baixar corpus final (formato IRaMuTeQ)",
+            data=corpus_final.encode("utf-8"),
+            file_name="corpus_final.txt",
+            mime="text/plain",
+        )
+        st.code(corpus_final[:3000] + ("\n…" if len(corpus_final) > 3000 else ""), language=None)
+
+
 if translate_btn:
     docs = load_corpus()
     progress = st.progress(0, text="Traduzindo…")
@@ -216,9 +289,28 @@ if run_btn:
     # --- Tradução ---
     if translate_pt:
         texts = translate_docs(docs, progress)
+        langs = [r.source_lang for r in st.session_state["translation"]["results"]]
+        headers = [
+            f"{d.header or f'**** *doc_{i:03d}'} *lang_{lang}"
+            for i, (d, lang) in enumerate(zip(docs, langs), 1)
+        ]
     else:
         texts = [d.text for d in docs]
+        headers = [d.header for d in docs]
         st.session_state.pop("translation", None)
+
+    # --- Limpeza (regras do IRaMuTeQ) ---
+    final_docs = [Document(t, h) for t, h in zip(texts, headers)]
+    if clean_corpus:
+        final_docs, report = clean_documents(final_docs, compound_terms)
+        st.session_state["cleaning"] = report.summary_lines()
+        if not final_docs:
+            st.error("Nenhum texto restou após a limpeza.")
+            st.stop()
+    else:
+        st.session_state.pop("cleaning", None)
+    texts = [d.text for d in final_docs]
+    st.session_state["final_corpus"] = to_iramuteq(texts, [d.header for d in final_docs])
 
     # --- Classificação ---
 
@@ -256,15 +348,19 @@ if run_btn:
             **Checklist de instalação:**
             1. R instalado (`sudo apt install r-base r-base-dev`)
             2. No R: `install.packages(c("quanteda", "rainette"))`
-            3. Python: `pip install rpy2`
+            3. Python: `pip install -r requirements-r.txt` (ou use o Docker)
             """
         )
+        render_translation_panel()
+        render_final_corpus_panel()
         st.stop()
     except Exception as e:
         progress.empty()
         status.empty()
         st.error("Falha na classificação")
         st.exception(e)
+        render_translation_panel()
+        render_final_corpus_panel()
         st.stop()
 
     # --- Interpretação LLM ---
@@ -324,44 +420,8 @@ if run_btn:
 # Exibição dos resultados (session_state)
 # ---------------------------------------------------------------------------
 
-def render_translation_panel() -> None:
-    data = st.session_state.get("translation")
-    if not data:
-        return
-    results = data["results"]
-    n_translated = sum(r.translated for r in results)
-    resumo = ", ".join(
-        f"{LANGUAGE_NAMES.get(lang, lang)}: {qty}" for lang, qty in data["summary"].items()
-    )
-    st.subheader("🌐 Tradução para português")
-    st.caption(f"{n_translated} de {len(results)} texto(s) traduzido(s) · Idiomas detectados — {resumo}")
-
-    corpus_pt = to_iramuteq(
-        [r.text for r in results],
-        headers=data["headers"],
-        extra_vars=[f"*lang_{r.source_lang}" for r in results],
-    )
-    st.download_button(
-        "⬇️ Baixar corpus em português (formato IRaMuTeQ)",
-        data=corpus_pt.encode("utf-8"),
-        file_name="corpus_pt.txt",
-        mime="text/plain",
-    )
-    with st.expander("Ver original × tradução", expanded=False):
-        for i, r in enumerate(results, 1):
-            if not r.translated:
-                continue
-            st.markdown(f"**Texto {i}** · {LANGUAGE_NAMES.get(r.source_lang, r.source_lang)}"
-                        + (" · cache" if r.cached else ""))
-            c1, c2 = st.columns(2)
-            c1.caption("Original")
-            c1.write(r.original)
-            c2.caption("Português")
-            c2.write(r.text)
-    st.divider()
-
-
 render_translation_panel()
+render_final_corpus_panel()
 
 classes = st.session_state.get("classes")
 interpretations = st.session_state.get("interpretations", {})

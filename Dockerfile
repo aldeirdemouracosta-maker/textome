@@ -23,13 +23,14 @@ ENV VIRTUAL_ENV=/opt/venv \
 RUN python3 -m venv $VIRTUAL_ENV
 
 WORKDIR /app
-COPY requirements.txt requirements-r.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-r.txt
+COPY requirements.txt requirements-r.txt requirements-audio.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-r.txt -r requirements-audio.txt
 
 COPY . .
 
 # Verifica na construção que R + rainette + rpy2 estão funcionando
-RUN python -c "from rainette_bridge import RainetteBridge; RainetteBridge(); print('rainette OK')"
+RUN python -c "from rainette_bridge import RainetteBridge; RainetteBridge(); print('rainette OK')" \
+    && python -c "import faster_whisper; print('whisper OK')"
 
 EXPOSE 8501
 CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501"]

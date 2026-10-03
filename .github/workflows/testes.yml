@@ -19,8 +19,31 @@ jobs:
           python test_e2e_mock.py
           python test_traducao_e_correcoes.py
           python test_cli.py
+          python test_limpeza_transcricao.py
       - name: Linha de comando (fumaça)
         run: python cli.py config-exemplo
+
+  whisper:
+    # Gera fala sintética em português (espeak-ng) e transcreve com o Whisper real.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get update && sudo apt-get install -y espeak-ng
+      - run: pip install -r requirements.txt -r requirements-audio.txt
+      - name: Transcrever entrevista sintética
+        run: |
+          mkdir audios
+          espeak-ng -v pt-br -s 140 -w audios/ent01.wav \
+            "O posto de saúde do meu bairro está sempre lotado. A gente espera muitas horas para ser atendido."
+          printf 'arquivo;sexo;bairro\nent01.wav;F;Centro\n' > participantes.csv
+          python cli.py transcrever audios --variaveis participantes.csv \
+            --modelo-whisper base --idioma pt --saida corpus_entrevistas.txt
+          cat corpus_entrevistas.txt
+          grep -q '^\*\*\*\* \*ent_ent01 \*sexo_f \*bairro_centro$' corpus_entrevistas.txt
+          grep -qiE 'sa[uú]de|bairro|lotado|atendid' corpus_entrevistas.txt
 
   docker:
     # Constrói a imagem (R + rainette + Python) e roda uma análise real

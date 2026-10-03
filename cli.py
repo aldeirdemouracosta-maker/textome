@@ -4,6 +4,9 @@ Textome na linha de comando — roda sem clicar e em lote.
   python cli.py run corpus.txt --config pesquisa.yaml --saida resultados/
   python cli.py run pasta_com_txts/ --k 6 --modelo llama3.1:8b
   python cli.py traduzir entrevistas_en.txt --saida traduzidos/
+  python cli.py limpar corpus.txt --termos termos.txt --saida limpos/
+  python cli.py importar respostas.csv --texto resposta --variaveis sexo idade --saida corpus.txt
+  python cli.py transcrever audios/ --variaveis participantes.csv --saida corpus.txt
   python cli.py config-exemplo > pesquisa.yaml
 """
 
@@ -15,6 +18,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from corpus import to_iramuteq
+from limpeza import clean_documents, load_compound_terms, read_table, table_to_documents
 from pipeline import Config, load_documents, run_pipeline, write_outputs
 from translator import LANGUAGE_NAMES, CorpusTranslator, language_summary
 
@@ -31,6 +35,12 @@ min_docfreq: 3         # frequência mínima de um termo
 n_terms: 20            # formas características por classe
 seed: 42               # semente (reprodutibilidade)
 language: pt           # stopwords, quando translate: false
+
+# --- Limpeza (regras do IRaMuTeQ) ---
+clean: true
+compound_terms:        # expressões unidas por "_" (ex.: sistema_único_de_saúde)
+  # - sistema único de saúde
+  # - bem estar
 
 # --- Tradução para português ---
 translate: true
@@ -68,15 +78,20 @@ def find_inputs(paths: List[str]) -> List[Path]:
 
 def build_config(args: argparse.Namespace) -> Config:
     cfg = Config.from_yaml(args.config) if args.config else Config()
+    if getattr(args, "termos", None):
+        cfg = cfg.with_overrides(
+            compound_terms=list(cfg.compound_terms) + load_compound_terms(args.termos)
+        )
     return cfg.with_overrides(
-        k=args.k,
-        model=args.modelo,
-        source_lang=args.idioma_origem,
-        translate=False if args.sem_traducao else None,
+        clean=False if getattr(args, "sem_limpeza", False) else None,
+        k=getattr(args, "k", None),
+        model=getattr(args, "modelo", None),
+        source_lang=getattr(args, "idioma_origem", None),
+        translate=False if getattr(args, "sem_traducao", False) else None,
         use_llm=False if getattr(args, "sem_llm", False) else None,
-        mock=True if args.mock else None,
+        mock=True if getattr(args, "mock", False) else None,
         deep=True if getattr(args, "profunda", False) else None,
-        force_refresh=True if args.forcar else None,
+        force_refresh=True if getattr(args, "forcar", False) else None,
     )
 
 
@@ -137,6 +152,73 @@ def cmd_traduzir(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def _print_report(report) -> None:
+    for line in report.summary_lines() or ["nenhuma alteração necessária"]:
+        print(f"    · {line}")
+
+
+def cmd_limpar(args: argparse.Namespace) -> int:
+    cfg = build_config(args)
+    out_root = Path(args.saida)
+    out_root.mkdir(parents=True, exist_ok=True)
+    for path in find_inputs(args.entradas):
+        docs, report = clean_documents(load_documents(path), cfg.compound_terms)
+        out = out_root / f"{path.stem}_limpo.txt"
+        out.write_text(to_iramuteq([d.text for d in docs], [d.header for d in docs]), encoding="utf-8")
+        print(f"✔ {path} → {out}")
+        _print_report(report)
+    return 0
+
+
+def cmd_importar(args: argparse.Namespace) -> int:
+    cfg = build_config(args)
+    docs = table_to_documents(read_table(args.planilha), args.texto, args.variaveis or [])
+    report = None
+    if not args.sem_limpeza:
+        docs, report = clean_documents(docs, cfg.compound_terms)
+    out = Path(args.saida)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(to_iramuteq([d.text for d in docs], [d.header for d in docs]), encoding="utf-8")
+    print(f"✔ {len(docs)} resposta(s) → {out}")
+    if report:
+        _print_report(report)
+    return 0
+
+
+def cmd_transcrever(args: argparse.Namespace, transcriber=None) -> int:
+    from transcricao import WhisperTranscriber, find_audio, load_variables, transcribe_to_documents
+
+    cfg = build_config(args)
+    files = find_audio(args.entradas)
+    variables = load_variables(args.variaveis) if args.variaveis else {}
+    if transcriber is None:
+        print(f"Carregando Whisper ({args.modelo_whisper})… na 1ª vez o modelo é baixado.")
+        transcriber = WhisperTranscriber(
+            args.modelo_whisper, language=None if args.idioma == "auto" else args.idioma
+        )
+    docs, transcripts, warnings = transcribe_to_documents(
+        files, transcriber, variables,
+        progress=lambda i, n, p: print(f"  [{i}/{n}] {p.name}"),
+    )
+    for tr in transcripts:
+        print(f"    {tr.source.name}: idioma {tr.language}, {tr.duration_s / 60:.1f} min")
+    report = None
+    if not args.sem_limpeza:
+        docs, report = clean_documents(docs, cfg.compound_terms)
+    out = Path(args.saida)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(to_iramuteq([d.text for d in docs], [d.header for d in docs]), encoding="utf-8")
+    print(f"✔ {len(docs)} entrevista(s) → {out}")
+    for w in warnings:
+        print(f"  ⚠ {w}")
+    if report:
+        _print_report(report)
+    print("Revise a transcrição antes da análise (nomes próprios, falas do entrevistador).")
+    if any(tr.language != "pt" for tr in transcripts):
+        print(f"Há áudio em outro idioma: rode 'python cli.py traduzir {out}' ou 'run' (traduz sozinho).")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="textome", description="Textome — CHD (Reinert) + tradução + interpretação com LLM local."
@@ -153,6 +235,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--mock", action="store_true", help="LLM simulado (teste sem Ollama)")
         p.add_argument("--forcar", action="store_true", help="ignorar o cache")
         p.add_argument("--k", type=int, help="número de classes")
+        p.add_argument("--termos", help="arquivo com expressões compostas, uma por linha")
+        p.add_argument("--sem-limpeza", action="store_true", help="não aplicar a limpeza IRaMuTeQ")
 
     run = sub.add_parser("run", help="análise completa (tradução → CHD → LLM → relatório)")
     common(run)
@@ -161,6 +245,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     tr = sub.add_parser("traduzir", help="só traduzir corpus para português (formato IRaMuTeQ)")
     common(tr)
+
+    lp = sub.add_parser("limpar", help="limpar corpus segundo as regras do IRaMuTeQ")
+    lp.add_argument("entradas", nargs="+", help="arquivos .txt ou pastas com .txt")
+    lp.add_argument("--config")
+    lp.add_argument("--termos", help="arquivo com expressões compostas, uma por linha")
+    lp.add_argument("--saida", default="limpos", help="pasta de saída (padrão: limpos)")
+
+    im = sub.add_parser("importar", help="planilha (CSV/XLSX) de respostas → corpus IRaMuTeQ")
+    im.add_argument("planilha")
+    im.add_argument("--texto", required=True, help="coluna com o texto")
+    im.add_argument("--variaveis", nargs="*", help="colunas que viram variáveis (*coluna_valor)")
+    im.add_argument("--config")
+    im.add_argument("--termos")
+    im.add_argument("--sem-limpeza", action="store_true")
+    im.add_argument("--saida", default="corpus.txt")
+
+    ts = sub.add_parser("transcrever", help="áudios de entrevistas → corpus IRaMuTeQ (Whisper local)")
+    ts.add_argument("entradas", nargs="+", help="arquivos de áudio/vídeo ou pastas")
+    ts.add_argument("--variaveis", help="planilha com coluna 'arquivo' + variáveis de cada participante")
+    ts.add_argument("--modelo-whisper", default="small",
+                    help="tiny, base, small (padrão), medium, large-v3")
+    ts.add_argument("--idioma", default="auto", help="auto (padrão) ou código, ex.: pt")
+    ts.add_argument("--config")
+    ts.add_argument("--termos")
+    ts.add_argument("--sem-limpeza", action="store_true")
+    ts.add_argument("--saida", default="corpus_entrevistas.txt")
 
     sub.add_parser("config-exemplo", help="imprime um YAML de configuração comentado")
     return parser
@@ -174,8 +284,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
         if args.comando == "traduzir":
             return cmd_traduzir(args)
+        if args.comando == "limpar":
+            return cmd_limpar(args)
+        if args.comando == "importar":
+            return cmd_importar(args)
+        if args.comando == "transcrever":
+            return cmd_transcrever(args)
         return cmd_run(args)
-    except (FileNotFoundError, ValueError) as e:
+    except (FileNotFoundError, ValueError, ImportError) as e:
         print(f"Erro: {e}", file=sys.stderr)
         return 2
 

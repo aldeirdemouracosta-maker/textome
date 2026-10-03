@@ -19,6 +19,8 @@ Interface moderna para **Classificação Hierárquica Descendante** (método Rei
 | `app.py` | App completo (corpus → CHD → LLM) |
 | `cli.py` | Linha de comando: `run`, `traduzir`, `config-exemplo` |
 | `pipeline.py` | Pipeline sem interface + relatório/JSON/CSV |
+| `limpeza.py` | Limpeza IRaMuTeQ, validação de cabeçalhos, planilha → corpus |
+| `transcricao.py` | Áudio → texto com Whisper local (faster-whisper) |
 | `app_demo.py` | Demo só do módulo de interpretação |
 | `llm_interpreter.py` | LLM + cache SQLite + TTL + mock |
 | `rainette_bridge.py` | Ponte Python ↔ rainette (R) |
@@ -53,6 +55,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 # para CHD completo:
 pip install -r requirements-r.txt
+# para transcrever áudio:
+pip install -r requirements-audio.txt
 ```
 
 ## Executar com Docker (recomendado)
@@ -71,6 +75,52 @@ Linha de comando dentro do Docker (coloque os arquivos na pasta `dados/`):
 docker compose run --rm textome python cli.py run dados/corpus.txt --saida dados/resultados
 ```
 
+## Preparar o corpus
+
+### Limpeza automática (regras do IRaMuTeQ)
+
+Aplicada por padrão na análise (`clean: true`) e disponível como comando:
+
+```bash
+python cli.py limpar corpus.txt --termos termos.txt --saida limpos/
+```
+
+| Antes | Depois |
+|---|---|
+| `"não"`, `“sim”` | `não`, `sim` (aspas removidas) |
+| `guarda-chuva`, `bem-te-vi` | `guarda_chuva`, `bem_te_vi` |
+| `disse-me`, `fazê-lo` | `disse me`, `fazê lo` (pronome separado) |
+| `Sistema Único de Saúde` (em `termos.txt`) | `sistema_único_de_saúde` |
+| `50%`, `&`, `...` | `50 por_cento`, `e`, `.` |
+| `*`, `$`, `#`, `@`, emojis, URLs | removidos |
+| `**** *Suj_01 *região_Sul` | `**** *Suj_01 *regiao_sul` (cabeçalho corrigido) |
+
+Linhas temáticas `-*tema` são preservadas. O relatório lista tudo que foi alterado.
+`termos.txt` tem uma expressão composta por linha (ou use `compound_terms` no YAML).
+
+### Planilha de respostas abertas → corpus
+
+```bash
+python cli.py importar respostas.csv --texto resposta --variaveis sexo idade escolaridade --saida corpus.txt
+```
+
+Aceita CSV (separador `,` `;` ou tab, UTF-8 ou Windows) e XLSX. Cada linha vira um texto
+com cabeçalho `**** *sexo_f *idade_30 *escolaridade_superior`; respostas vazias são ignoradas.
+
+### Áudio de entrevistas → corpus (Whisper local)
+
+```bash
+pip install -r requirements-audio.txt
+python cli.py transcrever audios/ --variaveis participantes.csv --saida corpus_entrevistas.txt
+```
+
+- `participantes.csv` tem a coluna `arquivo` (nome do áudio, com ou sem extensão) e uma coluna por variável.
+- Formatos: mp3, wav, m4a, ogg, opus, flac, mp4, webm etc.
+- `--modelo-whisper`: `tiny`, `base`, `small` (padrão), `medium`, `large-v3` — maiores são mais precisos e mais lentos.
+- `--idioma pt` força português; o padrão detecta o idioma. Áudio em outro idioma é traduzido depois pelo `run`/`traduzir`.
+- O modelo é baixado uma vez na primeira execução; depois tudo roda offline.
+- **Revise a transcrição** antes da análise. O Whisper não separa entrevistador e entrevistado: remova as perguntas do entrevistador se elas não devem entrar no corpus.
+
 ## Linha de comando (sem clicar, em lote)
 
 ```bash
@@ -80,7 +130,7 @@ python cli.py run pasta_com_txts/ --k 6              # um subdiretório de resul
 python cli.py traduzir entrevistas_en.txt --saida traduzidos/   # só tradução
 ```
 
-Opções úteis: `--modelo`, `--k`, `--idioma-origem`, `--sem-traducao`, `--sem-llm`,
+Opções úteis: `--modelo`, `--k`, `--idioma-origem`, `--sem-traducao`, `--sem-limpeza`, `--termos`, `--sem-llm`,
 `--profunda`, `--forcar` (ignora o cache), `--mock` (teste sem Ollama).
 A linha de comando sobrepõe o YAML. Em lote, um arquivo com erro não interrompe os demais.
 
@@ -91,7 +141,7 @@ Arquivos gerados em cada pasta de resultado:
 | `relatorio.md` | Seção de **método pronta para citar** + classes, formas (χ²), segmentos e interpretações |
 | `classes.json` | Todos os resultados, para outras análises |
 | `formas.csv` | Formas por classe (separado por `;`, abre direto no Excel) |
-| `corpus_pt.txt` | Corpus traduzido no formato IRaMuTeQ, com `*lang_xx` |
+| `corpus_final.txt` | Corpus **exatamente como foi analisado** (traduzido e limpo), no formato IRaMuTeQ, com `*lang_xx` |
 | `config_usada.yaml` | Parâmetros exatos usados (reprodutibilidade) |
 
 O endereço do Ollama vem da variável `OLLAMA_HOST` (padrão `http://localhost:11434`).
@@ -120,6 +170,7 @@ python test_cache.py
 python test_e2e_mock.py
 python test_traducao_e_correcoes.py
 python test_cli.py
+python test_limpeza_transcricao.py
 ```
 
 Os testes rodam automaticamente no GitHub Actions a cada envio.

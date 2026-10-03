@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional
 import yaml
 
 from corpus import Document, decode_bytes, parse_corpus, to_iramuteq
+from limpeza import CleaningReport, clean_documents
 from llm_interpreter import DEFAULT_HOST, ClassInterpreter
 from translator import LANGUAGE_NAMES, CorpusTranslator, language_summary
 
@@ -32,6 +33,9 @@ class Config:
     n_terms: int = 20
     seed: int = 42
     language: str = "pt"          # stopwords quando não há tradução
+    # Limpeza (regras do IRaMuTeQ)
+    clean: bool = True
+    compound_terms: List[str] = field(default_factory=list)  # ex.: "sistema único de saúde"
     # Tradução
     translate: bool = True
     source_lang: str = "auto"
@@ -58,6 +62,8 @@ class Config:
         unknown = sorted(set(data) - known)
         if unknown:
             raise ValueError(f"Parâmetros desconhecidos na configuração: {', '.join(unknown)}")
+        if data.get("compound_terms") is None:
+            data = {**data, "compound_terms": []}
         return cls(**data)
 
     def with_overrides(self, **overrides: Any) -> "Config":
@@ -74,7 +80,9 @@ class PipelineResult:
     config: Config
     source_name: str
     documents: List[Document]
-    texts: List[str]                       # textos analisados (traduzidos, se for o caso)
+    texts: List[str]                       # textos analisados (traduzidos e limpos)
+    final_documents: List[Document] = field(default_factory=list)  # corpus como analisado
+    cleaning: Optional[CleaningReport] = None
     translations: list = field(default_factory=list)
     classes: Dict[int, Dict[str, Any]] = field(default_factory=dict)
     sizes: Dict[int, int] = field(default_factory=dict)
@@ -131,6 +139,27 @@ def run_pipeline(
             for k, v in language_summary(result.translations).items()
         )
         log(f"Idiomas: {resumo}")
+
+    headers = [d.header for d in documents]
+    if result.translations:
+        headers = [
+            f"{h or f'**** *doc_{i:03d}'} *lang_{r.source_lang}"
+            for i, (h, r) in enumerate(zip(headers, result.translations), 1)
+        ]
+    final = [Document(t, h) for t, h in zip(result.texts, headers)]
+    if config.clean:
+        final, result.cleaning = clean_documents(final, config.compound_terms)
+        n = sum(result.cleaning.changes.values())
+        log(f"Limpeza: {n} alteração(ões), {len(result.cleaning.header_problems)} problema(s) de cabeçalho")
+        result.warnings += result.cleaning.header_problems
+        if result.cleaning.empty_documents:
+            result.warnings.append(
+                f"Documentos vazios após a limpeza (ignorados): {result.cleaning.empty_documents}"
+            )
+    result.final_documents = final
+    result.texts = [d.text for d in final]
+    if not result.texts:
+        raise ValueError("Nenhum texto restou após a limpeza.")
 
     log(f"CHD (rainette), k={config.k}…")
     bridge = bridge_factory()
@@ -201,6 +230,15 @@ def build_report(result: PipelineResult) -> str:
             f"- Tradução automática para o português de {n} documento(s) com o modelo "
             f"local `{cfg.model}` (temperatura 0). Idiomas de origem: {idiomas}."
         )
+    if cfg.clean and result.cleaning is not None:
+        detalhes = ", ".join(f"{r} ({n})" for r, n in result.cleaning.changes.most_common())
+        lines.append(
+            "- Corpus preparado segundo as regras do IRaMuTeQ (remoção de aspas e "
+            "caracteres especiais, hífens e expressões compostas unidas por \"_\")"
+            + (f": {detalhes}." if detalhes else "; nenhuma alteração necessária.")
+        )
+        if cfg.compound_terms:
+            lines.append(f"- Expressões compostas definidas: {', '.join(cfg.compound_terms)}.")
     lines += [
         f"- Classificação Hierárquica Descendente (método Reinert) com o pacote R rainette: "
         f"k = {cfg.k}, segmentos de ~{cfg.segment_size} palavras, mínimo de "
@@ -286,13 +324,10 @@ def write_outputs(result: PipelineResult, out_dir: str | Path) -> List[Path]:
                 writer.writerow([cid, _class_name(result, cid), f, f"{c:.3f}"])
     written.append(csv_path)
 
-    if result.translations:
-        write(
-            "corpus_pt.txt",
-            to_iramuteq(
-                [r.text for r in result.translations],
-                headers=[d.header for d in result.documents],
-                extra_vars=[f"*lang_{r.source_lang}" for r in result.translations],
-            ),
-        )
+    # Corpus exatamente como foi analisado (traduzido e limpo), pronto para o IRaMuTeQ.
+    write(
+        "corpus_final.txt",
+        to_iramuteq([d.text for d in result.final_documents],
+                    headers=[d.header for d in result.final_documents]),
+    )
     return written

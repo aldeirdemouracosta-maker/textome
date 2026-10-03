@@ -31,7 +31,9 @@ services:
     volumes:
       - ./dados:/app/dados
       - cache:/app/.cache
+      - whisper:/root/.cache/huggingface   # modelos do Whisper (baixados uma vez)
 
 volumes:
   ollama:
   cache:
+  whisper:

@@ -21,3 +21,23 @@ jobs:
           python test_cli.py
       - name: Linha de comando (fumaça)
         run: python cli.py config-exemplo
+
+  docker:
+    # Constrói a imagem (R + rainette + Python) e roda uma análise real
+    # da CHD no corpus de exemplo, com LLM simulado.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir imagem
+        run: docker build -t textome .
+      - name: Análise completa no corpus de exemplo
+        run: |
+          mkdir -p saida && chmod 777 saida
+          docker run --rm -v "$PWD/saida:/saida" textome \
+            python cli.py run exemplos/corpus_demo.txt --mock --k 4 --saida /saida
+          cat saida/relatorio.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultado-exemplo
+          path: saida/

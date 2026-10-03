@@ -1,0 +1,158 @@
+**** *doc_001 *tema_saude
+A saúde pública enfrenta sérios problemas de financiamento e falta de profissionais qualificados nos hospitais.
+
+**** *doc_002 *tema_saude
+Os hospitais da rede pública sofrem com a escassez de leitos, medicamentos e equipamentos básicos.
+
+**** *doc_003 *tema_saude
+O atendimento no SUS é frequentemente demorado e as filas de espera aumentam a cada ano.
+
+**** *doc_004 *tema_saude
+É urgente investir em infraestrutura hospitalar e na capacitação contínua dos médicos e enfermeiros.
+
+**** *doc_005 *tema_educacao
+A educação de qualidade depende de professores bem formados, valorizados e com condições dignas de trabalho.
+
+**** *doc_006 *tema_educacao
+As escolas públicas precisam de melhores instalações, materiais didáticos atualizados e merenda adequada.
+
+**** *doc_007 *tema_educacao
+O ensino fundamental ainda registra altas taxas de evasão e repetência em várias regiões do país.
+
+**** *doc_008 *tema_educacao
+A valorização do magistério e a formação continuada são essenciais para melhorar a educação nacional.
+
+**** *doc_009 *tema_seguranca
+A violência urbana cresce nas periferias e exige políticas de segurança integradas com assistência social.
+
+**** *doc_010 *tema_seguranca
+O policiamento ostensivo sozinho não resolve; é preciso prevenir com educação e oportunidade de emprego.
+
+**** *doc_011 *tema_renda
+As famílias mais pobres sofrem com a falta de acesso a serviços básicos e a exclusão digital.
+
+**** *doc_012 *tema_renda
+Programas de transferência de renda ajudam, mas precisam ser acompanhados de capacitação profissional.
+
+**** *doc_013 *tema_ambiente
+O meio ambiente está sob pressão: desmatamento, poluição dos rios e mudança climática afetam todos.
+
+**** *doc_014 *tema_ambiente
+A preservação das florestas e o uso sustentável dos recursos naturais são temas centrais da agenda pública.
+
+**** *doc_015 *tema_juventude
+A juventude enfrenta desemprego e falta de perspectiva, o que alimenta ciclos de pobreza e violência.
+
+**** *doc_016 *tema_juventude
+Investir em cultura, esporte e lazer nas periferias é uma forma de inclusão e prevenção social.
+
+**** *doc_017 *tema_saude
+A saúde pública enfrenta sérios problemas de financiamento e falta de profissionais qualificados nos hospitais.
+
+**** *doc_018 *tema_saude
+Os hospitais da rede pública sofrem com a escassez de leitos, medicamentos e equipamentos básicos.
+
+**** *doc_019 *tema_saude
+O atendimento no SUS é frequentemente demorado e as filas de espera aumentam a cada ano.
+
+**** *doc_020 *tema_saude
+É urgente investir em infraestrutura hospitalar e na capacitação contínua dos médicos e enfermeiros.
+
+**** *doc_021 *tema_educacao
+A educação de qualidade depende de professores bem formados, valorizados e com condições dignas de trabalho.
+
+**** *doc_022 *tema_educacao
+As escolas públicas precisam de melhores instalações, materiais didáticos atualizados e merenda adequada.
+
+**** *doc_023 *tema_educacao
+O ensino fundamental ainda registra altas taxas de evasão e repetência em várias regiões do país.
+
+**** *doc_024 *tema_educacao
+A valorização do magistério e a formação continuada são essenciais para melhorar a educação nacional.
+
+**** *doc_025 *tema_seguranca
+A violência urbana cresce nas periferias e exige políticas de segurança integradas com assistência social.
+
+**** *doc_026 *tema_seguranca
+O policiamento ostensivo sozinho não resolve; é preciso prevenir com educação e oportunidade de emprego.
+
+**** *doc_027 *tema_renda
+As famílias mais pobres sofrem com a falta de acesso a serviços básicos e a exclusão digital.
+
+**** *doc_028 *tema_renda
+Programas de transferência de renda ajudam, mas precisam ser acompanhados de capacitação profissional.
+
+**** *doc_029 *tema_ambiente
+O meio ambiente está sob pressão: desmatamento, poluição dos rios e mudança climática afetam todos.
+
+**** *doc_030 *tema_ambiente
+A preservação das florestas e o uso sustentável dos recursos naturais são temas centrais da agenda pública.
+
+**** *doc_031 *tema_juventude
+A juventude enfrenta desemprego e falta de perspectiva, o que alimenta ciclos de pobreza e violência.
+
+**** *doc_032 *tema_juventude
+Investir em cultura, esporte e lazer nas periferias é uma forma de inclusão e prevenção social.
+
+**** *doc_033 *tema_saude
+A saúde pública enfrenta sérios problemas de financiamento e falta de profissionais qualificados nos hospitais.
+
+**** *doc_034 *tema_saude
+Os hospitais da rede pública sofrem com a escassez de leitos, medicamentos e equipamentos básicos.
+
+**** *doc_035 *tema_saude
+O atendimento no SUS é frequentemente demorado e as filas de espera aumentam a cada ano.
+
+**** *doc_036 *tema_saude
+É urgente investir em infraestrutura hospitalar e na capacitação contínua dos médicos e enfermeiros.
+
+**** *doc_037 *tema_educacao
+A educação de qualidade depende de professores bem formados, valorizados e com condições dignas de trabalho.
+
+**** *doc_038 *tema_educacao
+As escolas públicas precisam de melhores instalações, materiais didáticos atualizados e merenda adequada.
+
+**** *doc_039 *tema_educacao
+O ensino fundamental ainda registra altas taxas de evasão e repetência em várias regiões do país.
+
+**** *doc_040 *tema_educacao
+A valorização do magistério e a formação continuada são essenciais para melhorar a educação nacional.
+
+**** *doc_041 *tema_seguranca
+A violência urbana cresce nas periferias e exige políticas de segurança integradas com assistência social.
+
+**** *doc_042 *tema_seguranca
+O policiamento ostensivo sozinho não resolve; é preciso prevenir com educação e oportunidade de emprego.
+
+**** *doc_043 *tema_renda
+As famílias mais pobres sofrem com a falta de acesso a serviços básicos e a exclusão digital.
+
+**** *doc_044 *tema_renda
+Programas de transferência de renda ajudam, mas precisam ser acompanhados de capacitação profissional.
+
+**** *doc_045 *tema_ambiente
+O meio ambiente está sob pressão: desmatamento, poluição dos rios e mudança climática afetam todos.
+
+**** *doc_046 *tema_ambiente
+A preservação das florestas e o uso sustentável dos recursos naturais são temas centrais da agenda pública.
+
+**** *doc_047 *tema_juventude
+A juventude enfrenta desemprego e falta de perspectiva, o que alimenta ciclos de pobreza e violência.
+
+**** *doc_048 *tema_juventude
+Investir em cultura, esporte e lazer nas periferias é uma forma de inclusão e prevenção social.
+
+**** *doc_049 *tema_saude
+Public hospitals lack beds, medicines and qualified doctors, and patients wait for months.
+
+**** *doc_050 *tema_educacao
+Public schools need better buildings, updated teaching materials and well paid teachers.
+
+**** *doc_051 *tema_ambiente
+La deforestación y la contaminación de los ríos amenazan los recursos naturales del país.
+
+**** *doc_052 *tema_seguranca
+La violencia urbana crece en las periferias y exige políticas de seguridad con asistencia social.
+
+**** *doc_053 *tema_renda
+Les familles pauvres souffrent du manque d'accès aux services de base et de l'exclusion numérique.

@@ -17,6 +17,8 @@ RUN apt-get update \
 ENV VIRTUAL_ENV=/opt/venv \
     PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
+    R_HOME=/usr/local/lib/R \
+    LD_LIBRARY_PATH=/usr/local/lib/R/lib \
     OLLAMA_HOST=http://ollama:11434
 RUN python3 -m venv $VIRTUAL_ENV
 

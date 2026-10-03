@@ -93,8 +93,8 @@ class RainetteBridge:
         corp <- split_segments(corp, segment_size = {int(segment_size)})
 
         tok <- tokens(corp, remove_punct = TRUE, remove_numbers = TRUE)
+        tok <- tokens_tolower(tok)  # antes das stopwords: "É" no início da frase também sai
         tok <- tokens_remove(tok, stopwords("{lang}"))
-        tok <- tokens_tolower(tok)
 
         dtm <- dfm(tok)
         dtm <- dfm_trim(dtm, min_docfreq = {int(min_docfreq)})
@@ -166,11 +166,13 @@ class RainetteBridge:
         if not indices:
             return []
         segment_texts = list(ro.r["segment_texts"])
-        selected = []
-        for idx in indices[:max_segments]:
+        selected: List[str] = []
+        for idx in indices:
+            if len(selected) >= max_segments:
+                break
             if 0 <= idx < len(segment_texts):
                 text = str(segment_texts[idx]).strip()
-                if text:
+                if text and text not in selected:  # sem repetir segmentos idênticos
                     selected.append(text)
         return selected
 

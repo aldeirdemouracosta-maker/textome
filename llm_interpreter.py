@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -19,6 +20,9 @@ try:
     import ollama
 except ImportError:
     ollama = None  # type: ignore
+
+# Sentinela: "usar o TTL padrão". None significa "sem expiração".
+USE_DEFAULT_TTL: Any = object()
 
 
 @dataclass
@@ -60,13 +64,19 @@ class InterpretationCacheSQLite:
             if removed > 0:
                 print(f"[cache] {removed} interpretações expiradas removidas automaticamente")
 
-    def _get_conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
+        """Abre conexão, faz commit/rollback e sempre fecha (evita .db travado)."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
-        with self._get_conn() as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS interpretations (
@@ -99,7 +109,6 @@ class InterpretationCacheSQLite:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_model ON interpretations(model_used)"
             )
-            conn.commit()
 
     @staticmethod
     def make_key(
@@ -128,7 +137,7 @@ class InterpretationCacheSQLite:
             return True
 
     def get(self, key: str) -> Optional[ClassInterpretation]:
-        with self._get_conn() as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM interpretations WHERE cache_key = ?",
                 (key,),
@@ -160,18 +169,19 @@ class InterpretationCacheSQLite:
         interpretation: ClassInterpretation,
         deep: bool = False,
         temperature: float = 0.3,
-        ttl_hours: Optional[int] = None,
+        ttl_hours: Optional[int] = USE_DEFAULT_TTL,
     ) -> None:
+        """ttl_hours: omitido → TTL padrão; None ou 0 → sem expiração."""
         now = datetime.now()
         created_at = now.isoformat(timespec="seconds")
 
-        ttl = ttl_hours if ttl_hours is not None else self.default_ttl_hours
+        ttl = self.default_ttl_hours if ttl_hours is USE_DEFAULT_TTL else ttl_hours
         if ttl is not None and ttl > 0:
             expires_at = (now + timedelta(hours=ttl)).isoformat(timespec="seconds")
         else:
             expires_at = None
 
-        with self._get_conn() as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO interpretations
@@ -194,27 +204,24 @@ class InterpretationCacheSQLite:
                     temperature,
                 ),
             )
-            conn.commit()
 
     def delete(self, key: str) -> bool:
-        with self._get_conn() as conn:
+        with self._connect() as conn:
             cur = conn.execute(
                 "DELETE FROM interpretations WHERE cache_key = ?",
                 (key,),
             )
-            conn.commit()
             return cur.rowcount > 0
 
     def clear(self) -> int:
-        with self._get_conn() as conn:
+        with self._connect() as conn:
             count = conn.execute("SELECT COUNT(*) FROM interpretations").fetchone()[0]
             conn.execute("DELETE FROM interpretations")
-            conn.commit()
         return count
 
     def purge_expired(self) -> int:
         now = datetime.now().isoformat(timespec="seconds")
-        with self._get_conn() as conn:
+        with self._connect() as conn:
             cur = conn.execute(
                 """
                 DELETE FROM interpretations
@@ -222,12 +229,11 @@ class InterpretationCacheSQLite:
                 """,
                 (now,),
             )
-            conn.commit()
             return cur.rowcount
 
     def stats(self) -> Dict[str, Any]:
         now = datetime.now().isoformat(timespec="seconds")
-        with self._get_conn() as conn:
+        with self._connect() as conn:
             total = conn.execute("SELECT COUNT(*) FROM interpretations").fetchone()[0]
             expired = conn.execute(
                 """
@@ -262,7 +268,7 @@ class InterpretationCacheSQLite:
 
     def list_recent(self, limit: int = 20) -> List[Dict[str, Any]]:
         now = datetime.now().isoformat(timespec="seconds")
-        with self._get_conn() as conn:
+        with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT class_id, nome, model_used, created_at, expires_at, deep
@@ -292,6 +298,7 @@ class LLMInterpreter:
         ttl_name_hours: Optional[int] = 720,
         ttl_deep_hours: Optional[int] = 168,
         auto_purge_on_init: bool = True,
+        mock: bool = False,
     ):
         self.model = model
         self.temperature = temperature
@@ -301,7 +308,10 @@ class LLMInterpreter:
         self.ttl_name_hours = ttl_name_hours
         self.ttl_deep_hours = ttl_deep_hours
 
-        self.client = ollama.Client(host=host) if ollama is not None else None
+        self.client = make_client(host, mock=mock)
+        # Respostas simuladas nunca podem se misturar no cache com as do modelo real.
+        self.is_mock = isinstance(self.client, MockOllamaClient)
+        self.model_key = f"mock::{model}" if self.is_mock else model
 
         self.cache = (
             InterpretationCacheSQLite(
@@ -377,11 +387,12 @@ Faça uma **interpretação aprofundada** (150-220 palavras) respondendo:
 
 Seja rigoroso e baseie-se apenas nos dados apresentados."""
 
-    def _call(self, prompt: str) -> str:
+    def _call(self, prompt: str, json_mode: bool = False) -> str:
         if self.client is None:
             raise RuntimeError(
                 "Biblioteca 'ollama' não está instalada ou o cliente não foi inicializado."
             )
+        kwargs: Dict[str, Any] = {"format": "json"} if json_mode else {}
         response = self.client.chat(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
@@ -389,17 +400,22 @@ Seja rigoroso e baseie-se apenas nos dados apresentados."""
                 "temperature": self.temperature,
                 "num_predict": 1024,
             },
+            **kwargs,
         )
-        return response["message"]["content"].strip()
+        return strip_thinking(response["message"]["content"])
 
     def _extract_json(self, text: str) -> Dict[str, str]:
         match = re.search(r"\{.*\}", text, re.DOTALL)
+        fallback = {"nome": "Classe sem nome", "descricao": text[:200]}
         if not match:
-            return {"nome": "Classe sem nome", "descricao": text[:200]}
+            return fallback
         try:
-            return json.loads(match.group(0))
+            data = json.loads(match.group(0))
         except json.JSONDecodeError:
-            return {"nome": "Classe sem nome", "descricao": text[:200]}
+            return fallback
+        if not isinstance(data, dict):
+            return fallback
+        return {k: str(v) for k, v in data.items() if v is not None}
 
     def interpret_class(
         self,
@@ -408,18 +424,19 @@ Seja rigoroso e baseie-se apenas nos dados apresentados."""
         segments: List[str],
         deep: bool = False,
         force_refresh: bool = False,
-        ttl_hours: Optional[int] = None,
+        ttl_hours: Optional[int] = USE_DEFAULT_TTL,
     ) -> ClassInterpretation:
+        """ttl_hours: omitido → TTL do tipo (nome ou profunda); None → sem expiração."""
+        key = InterpretationCacheSQLite.make_key(
+            forms, segments, self.model_key, self.temperature, deep
+        )
         if self.use_cache and self.cache and not force_refresh:
-            key = InterpretationCacheSQLite.make_key(
-                forms, segments, self.model, self.temperature, deep
-            )
             cached = self.cache.get(key)
             if cached is not None:
                 cached.class_id = class_id
                 return cached
 
-        raw_nome = self._call(self._prompt_nome_descricao(forms, segments))
+        raw_nome = self._call(self._prompt_nome_descricao(forms, segments), json_mode=True)
         parsed = self._extract_json(raw_nome)
         nome = parsed.get("nome", f"Classe {class_id}")
         descricao = parsed.get("descricao", "")
@@ -438,22 +455,19 @@ Seja rigoroso e baseie-se apenas nos dados apresentados."""
             descricao=descricao,
             resumo=resumo,
             interpretacao=interpretacao,
-            model_used=self.model,
+            model_used=self.model_key,
             cached=False,
             created_at=datetime.now().isoformat(timespec="seconds"),
             raw_response=raw_nome,
         )
 
         if self.use_cache and self.cache:
-            key = InterpretationCacheSQLite.make_key(
-                forms, segments, self.model, self.temperature, deep
-            )
-            if ttl_hours is not None:
+            if ttl_hours is not USE_DEFAULT_TTL:
                 effective_ttl = ttl_hours
             elif deep:
                 effective_ttl = self.ttl_deep_hours
             else:
-                effective_ttl = self.ttl_name_hours or self.default_ttl_hours
+                effective_ttl = self.ttl_name_hours
 
             self.cache.set(
                 key,
@@ -494,13 +508,39 @@ Seja rigoroso e baseie-se apenas nos dados apresentados."""
         return []
 
 
+def strip_thinking(text: str) -> str:
+    """Remove blocos <think>…</think> de modelos de raciocínio (ex.: qwen3)."""
+    return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+
+
+def make_client(host: str = "http://localhost:11434", mock: bool = False):
+    """Cliente Ollama real, ou o mock quando pedido explicitamente."""
+    if mock:
+        return MockOllamaClient()
+    return ollama.Client(host=host) if ollama is not None else None
+
+
+def _model_name(entry: Any) -> Optional[str]:
+    # ollama>=0.4 usa objetos com o campo "model"; versões antigas, dicts com "name".
+    for field in ("model", "name"):
+        value = getattr(entry, field, None)
+        if value is None and isinstance(entry, dict):
+            value = entry.get(field)
+        if value:
+            return str(value)
+    return None
+
+
 def list_available_models(host: str = "http://localhost:11434") -> List[str]:
     if ollama is None:
         return []
     try:
         client = ollama.Client(host=host)
-        models = client.list()
-        return [m["name"] for m in models.get("models", [])]
+        response = client.list()
+        entries = getattr(response, "models", None)
+        if entries is None and isinstance(response, dict):
+            entries = response.get("models", [])
+        return [name for name in map(_model_name, entries or []) if name]
     except Exception:
         return []
 
@@ -512,11 +552,17 @@ def list_available_models(host: str = "http://localhost:11434") -> List[str]:
 class MockOllamaClient:
     """Simula respostas do Ollama para testes e demo offline."""
 
-    def chat(self, model: str, messages: list, options: dict | None = None) -> dict:
+    def chat(
+        self, model: str, messages: list, options: dict | None = None, **kwargs: Any
+    ) -> dict:
         content = messages[-1]["content"] if messages else ""
         lower = content.lower()
 
-        if "json" in lower and "nome" in lower:
+        if "traduza o texto" in lower:
+            match = re.search(r"<texto>\n?(.*?)\n?</texto>", content, re.DOTALL)
+            original = match.group(1) if match else content
+            text = f"[tradução simulada] {original}"
+        elif "json" in lower and "nome" in lower:
             # Prompt de nome + descrição
             text = (
                 '{"nome": "Saúde pública e acesso", '
@@ -556,7 +602,10 @@ class MockOllamaClient:
 
 
 def enable_mock_ollama() -> None:
-    """Substitui o cliente real por mock (útil em testes)."""
+    """
+    Substitui o módulo ollama pelo mock no processo inteiro (útil em testes).
+    No app, prefira LLMInterpreter(mock=True), que não afeta outras instâncias.
+    """
     global ollama
 
     class _FakeOllamaModule:

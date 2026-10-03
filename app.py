@@ -6,9 +6,6 @@ e interpretação automática via LLM local (Ollama).
 
 from __future__ import annotations
 
-import io
-from typing import List
-
 import streamlit as st
 
 # ---------------------------------------------------------------------------
@@ -22,59 +19,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------------------
-# Utilitários de leitura de corpus
-# ---------------------------------------------------------------------------
-
-def parse_iramuteq_format(raw: str) -> List[str]:
-    """
-    Lê texto no formato IRaMuTeQ / Alceste.
-    Separadores típicos: **** ou **** *var_1 *var_2
-    """
-    lines = raw.splitlines()
-    documents: List[str] = []
-    current: List[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("****"):
-            if current:
-                documents.append("\n".join(current).strip())
-                current = []
-            continue
-        if stripped:
-            current.append(stripped)
-
-    if current:
-        documents.append("\n".join(current).strip())
-
-    # Se não havia separadores, trata o arquivo inteiro como um único texto
-    # e depois será segmentado pelo rainette
-    if not documents and raw.strip():
-        documents = [raw.strip()]
-
-    return [d for d in documents if d]
-
-
-def load_texts_from_upload(uploaded) -> List[str]:
-    content = uploaded.read()
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        text = content.decode("latin-1", errors="replace")
-
-    name = (uploaded.name or "").lower()
-    if name.endswith(".txt") or "iramuteq" in name or "****" in text[:2000]:
-        docs = parse_iramuteq_format(text)
-        if len(docs) >= 1:
-            return docs
-
-    # Fallback: uma linha = um documento, ou bloco único
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    if len(lines) > 5:
-        return lines
-    return [text.strip()] if text.strip() else []
-
+from corpus import Document, load_documents_from_upload, to_iramuteq
+from translator import LANGUAGE_NAMES
 
 # ---------------------------------------------------------------------------
 # Sidebar — parâmetros
@@ -87,7 +33,7 @@ with st.sidebar:
     uploaded = st.file_uploader(
         "Arquivo de texto (.txt)",
         type=["txt"],
-        help="Formato livre ou formato IRaMuTeQ (****).",
+        help="Formato livre ou formato IRaMuTeQ (****). Qualquer idioma.",
     )
 
     demo = st.checkbox("Usar corpus de demonstração", value=not bool(uploaded))
@@ -97,11 +43,29 @@ with st.sidebar:
     segment_size = st.slider("Tamanho preferido do segmento (palavras)", 20, 80, 40)
     min_segment_size = st.slider("Mín. formas por segmento", 5, 30, 12)
     min_docfreq = st.slider("Frequência mínima do termo (docfreq)", 2, 20, 3)
-    language = st.selectbox(
-        "Idioma (stopwords)",
-        options=["pt", "en", "fr", "es", "de", "it"],
-        index=0,
+
+    st.markdown("### Idioma e tradução")
+    translate_pt = st.checkbox(
+        "Traduzir textos para português",
+        value=True,
+        help="Detecta o idioma de cada texto e traduz com o LLM local o que não "
+             "estiver em português. A análise é feita sobre o texto traduzido.",
     )
+    source_lang = st.selectbox(
+        "Idioma de origem",
+        options=["auto", "en", "es", "fr", "de", "it", "outro"],
+        format_func=lambda c: "Detectar automaticamente" if c == "auto" else LANGUAGE_NAMES[c],
+        disabled=not translate_pt,
+    )
+    if translate_pt:
+        language = "pt"
+    else:
+        language = st.selectbox(
+            "Idioma do corpus (stopwords)",
+            options=["pt", "en", "fr", "es", "de", "it"],
+            format_func=lambda c: LANGUAGE_NAMES[c],
+            index=0,
+        )
 
     st.markdown("### LLM local (Ollama)")
     model = st.text_input("Modelo Ollama", value="qwen2.5:7b")
@@ -127,6 +91,12 @@ with st.sidebar:
         st.success(f"{n} entradas removidas")
 
     run_btn = st.button("▶ Executar análise", type="primary", use_container_width=True)
+    translate_btn = st.button(
+        "🌐 Só traduzir o corpus",
+        use_container_width=True,
+        disabled=not translate_pt,
+        help="Traduz e oferece o corpus em português (formato IRaMuTeQ) para download, sem rodar a CHD.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -182,29 +152,75 @@ with st.expander("Sobre este protótipo", expanded=False):
 # Execução
 # ---------------------------------------------------------------------------
 
-if run_btn:
-    # --- Carregar textos ---
+def load_corpus() -> list[Document]:
     if demo:
-        texts = DEMO_TEXTS
-        st.info(f"Corpus de demonstração carregado ({len(texts)} textos).")
-    elif uploaded is not None:
-        try:
-            texts = load_texts_from_upload(uploaded)
-            st.success(f"Arquivo carregado: {len(texts)} documento(s)/bloco(s).")
-        except Exception as e:
-            st.error(f"Erro ao ler o arquivo: {e}")
-            st.stop()
-    else:
+        docs = [Document(t) for t in DEMO_TEXTS]
+        st.info(f"Corpus de demonstração carregado ({len(docs)} textos).")
+        return docs
+    if uploaded is None:
         st.warning("Envie um arquivo ou ative o corpus de demonstração.")
         st.stop()
+    try:
+        uploaded.seek(0)
+        docs = load_documents_from_upload(uploaded)
+    except Exception as e:
+        st.error(f"Erro ao ler o arquivo: {e}")
+        st.stop()
+    if not docs:
+        st.error("O arquivo está vazio.")
+        st.stop()
+    st.success(f"Arquivo carregado: {len(docs)} documento(s).")
+    return docs
 
-    if len(texts) < 2:
-        st.error("É necessário pelo menos 2 textos/documentos para a classificação.")
+
+def translate_docs(docs: list[Document], progress) -> list[str]:
+    """Traduz para português o que não estiver em pt; guarda o resultado na sessão."""
+    from translator import CorpusTranslator, language_summary
+
+    translator = CorpusTranslator(model=model, use_cache=use_cache, mock=use_mock)
+
+    def on_progress(i: int, n: int) -> None:
+        progress.progress(int(10 * i / n), text=f"Traduzindo texto {i}/{n}…")
+
+    try:
+        results = translator.translate_corpus(
+            [d.text for d in docs],
+            source_lang=source_lang,
+            force_refresh=force_refresh,
+            progress=on_progress,
+        )
+    except Exception as e:
+        progress.empty()
+        st.error(f"Falha na tradução (o Ollama está rodando com o modelo {model}?): {e}")
         st.stop()
 
-    # --- Classificação ---
+    st.session_state["translation"] = {
+        "results": results,
+        "summary": language_summary(results),
+        "headers": [d.header for d in docs],
+    }
+    return [r.text for r in results]
+
+
+if translate_btn:
+    docs = load_corpus()
+    progress = st.progress(0, text="Traduzindo…")
+    translate_docs(docs, progress)
+    progress.empty()
+
+if run_btn:
+    docs = load_corpus()
     progress = st.progress(0, text="Preparando análise…")
     status = st.empty()
+
+    # --- Tradução ---
+    if translate_pt:
+        texts = translate_docs(docs, progress)
+    else:
+        texts = [d.text for d in docs]
+        st.session_state.pop("translation", None)
+
+    # --- Classificação ---
 
     try:
         status.info("Importando rainette_bridge…")
@@ -256,10 +272,9 @@ if run_btn:
     if use_llm:
         try:
             progress.progress(65, text="Interpretando classes com LLM…")
-            from llm_interpreter import ClassInterpreter, enable_mock_ollama
+            from llm_interpreter import ClassInterpreter
 
             if use_mock:
-                enable_mock_ollama()
                 status.info("Modo mock ativo (sem Ollama real).")
             else:
                 status.info(f"Chamando Ollama ({model})…")
@@ -269,13 +284,14 @@ if run_btn:
                 temperature=temperature,
                 use_cache=use_cache,
                 auto_purge_on_init=True,
+                mock=use_mock,
             )
             n = len(classes)
             cache_hits = 0
             for i, (cid, data) in enumerate(classes.items(), 1):
                 progress.progress(
                     65 + int(30 * i / max(n, 1)),
-                    text=f"Interpretando classe {cid}/{k}…",
+                    text=f"Interpretando classe {i}/{n}…",
                 )
                 forms_raw = data.get("forms", [])
                 segments = data.get("segments", [])
@@ -308,6 +324,45 @@ if run_btn:
 # Exibição dos resultados (session_state)
 # ---------------------------------------------------------------------------
 
+def render_translation_panel() -> None:
+    data = st.session_state.get("translation")
+    if not data:
+        return
+    results = data["results"]
+    n_translated = sum(r.translated for r in results)
+    resumo = ", ".join(
+        f"{LANGUAGE_NAMES.get(lang, lang)}: {qty}" for lang, qty in data["summary"].items()
+    )
+    st.subheader("🌐 Tradução para português")
+    st.caption(f"{n_translated} de {len(results)} texto(s) traduzido(s) · Idiomas detectados — {resumo}")
+
+    corpus_pt = to_iramuteq(
+        [r.text for r in results],
+        headers=data["headers"],
+        extra_vars=[f"*lang_{r.source_lang}" for r in results],
+    )
+    st.download_button(
+        "⬇️ Baixar corpus em português (formato IRaMuTeQ)",
+        data=corpus_pt.encode("utf-8"),
+        file_name="corpus_pt.txt",
+        mime="text/plain",
+    )
+    with st.expander("Ver original × tradução", expanded=False):
+        for i, r in enumerate(results, 1):
+            if not r.translated:
+                continue
+            st.markdown(f"**Texto {i}** · {LANGUAGE_NAMES.get(r.source_lang, r.source_lang)}"
+                        + (" · cache" if r.cached else ""))
+            c1, c2 = st.columns(2)
+            c1.caption("Original")
+            c1.write(r.original)
+            c2.caption("Português")
+            c2.write(r.text)
+    st.divider()
+
+
+render_translation_panel()
+
 classes = st.session_state.get("classes")
 interpretations = st.session_state.get("interpretations", {})
 sizes = st.session_state.get("sizes", {})
@@ -316,7 +371,8 @@ if not classes:
     st.markdown(
         """
         ### Como começar
-        1. (Opcional) Envie um arquivo `.txt` na barra lateral — formato livre ou IRaMuTeQ (`****`).
+        1. (Opcional) Envie um arquivo `.txt` na barra lateral — formato livre ou IRaMuTeQ (`****`),
+           em qualquer idioma (textos estrangeiros são traduzidos para o português).
         2. Ajuste `k` e demais parâmetros.
         3. Ative o LLM se o Ollama estiver rodando com o modelo desejado.
         4. Clique em **Executar análise**.
@@ -370,13 +426,12 @@ if use_llm and len(classes) >= 2 and interpretations:
 
     if do_cmp and id_a != id_b:
         try:
-            from llm_interpreter import ClassInterpreter, enable_mock_ollama
-            if use_mock:
-                enable_mock_ollama()
+            from llm_interpreter import ClassInterpreter
             interpreter = ClassInterpreter(
                 model=model,
                 temperature=temperature,
                 use_cache=use_cache,
+                mock=use_mock,
             )
             texto = interpreter.comparar(
                 id_a,

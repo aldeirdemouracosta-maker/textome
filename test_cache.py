@@ -75,7 +75,7 @@ def test_ttl_expiry():
         cache.set(key, interp, ttl_hours=1)
         # força expiração manual
         past = (datetime.now() - timedelta(hours=2)).isoformat(timespec="seconds")
-        with cache._get_conn() as conn:
+        with cache._connect() as conn:
             conn.execute(
                 "UPDATE interpretations SET expires_at = ? WHERE cache_key = ?",
                 (past, key),
@@ -103,7 +103,7 @@ def test_purge_expired():
         cache.set(key_exp, interp, ttl_hours=1)
 
         past = (datetime.now() - timedelta(hours=5)).isoformat(timespec="seconds")
-        with cache._get_conn() as conn:
+        with cache._connect() as conn:
             conn.execute(
                 "UPDATE interpretations SET expires_at = ? WHERE cache_key = ?",
                 (past, key_exp),

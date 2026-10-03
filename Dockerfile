@@ -1,7 +1,7 @@
 # Textome: R (rainette + quanteda) + Python (Streamlit, rpy2, Ollama client)
 # Construir:  docker build -t textome .
 # Usar:       docker compose up   (app em http://localhost:8501, com Ollama)
-FROM rocker/r-ver:4.4.2
+FROM rocker/r-ver:4.5
 
 # Pacotes R (binários do repositório configurado na imagem rocker)
 RUN install2.r --error --skipinstalled --ncpus -1 quanteda rainette \

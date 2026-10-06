@@ -33,6 +33,7 @@ class Config:
     n_terms: int = 20
     seed: int = 42
     language: str = "pt"          # stopwords quando não há tradução
+    extra_stopwords: List[str] = field(default_factory=list)  # palavras a ignorar na CHD
     # Limpeza (regras do IRaMuTeQ)
     clean: bool = True
     compound_terms: List[str] = field(default_factory=list)  # ex.: "sistema único de saúde"
@@ -68,7 +69,10 @@ class Config:
         unknown = sorted(set(data) - known)
         if unknown:
             raise ValueError(f"Parâmetros desconhecidos na configuração: {', '.join(unknown)}")
-        if data.get("compound_terms") is None:
+        for key in ("compound_terms", "extra_stopwords"):
+            if key in data and data[key] is None:
+                data = {**data, key: []}
+        if "compound_terms" not in data:
             data = {**data, "compound_terms": []}
         return cls(**data)
 
@@ -184,6 +188,7 @@ def run_pipeline(
         min_docfreq=config.min_docfreq,
         n_terms=config.n_terms,
         seed=config.seed,
+        **({"extra_stopwords": config.extra_stopwords} if config.extra_stopwords else {}),
     )
     result.sizes = bridge.get_group_sizes()
     if hasattr(bridge, "get_segments"):

@@ -40,6 +40,8 @@ language: pt           # stopwords, quando translate: false
 
 # --- Limpeza (regras do IRaMuTeQ) ---
 clean: true
+extra_stopwords:       # palavras a ignorar na CHD, além da lista padrão
+  # - gente
 compound_terms:        # expressões unidas por "_" (ex.: sistema_único_de_saúde)
   # - sistema único de saúde
   # - bem estar

@@ -67,6 +67,7 @@ class RainetteBridge:
         min_docfreq: int = 5,
         n_terms: int = 20,
         seed: int = 42,
+        extra_stopwords: Optional[List[str]] = None,
     ) -> Dict[int, Dict[str, Any]]:
         """
         Pipeline completo de classificação.
@@ -83,8 +84,13 @@ class RainetteBridge:
         self.k = k
         lang = language if language in ("pt", "en", "fr", "es", "de", "it") else "en"
 
+        from corpus import EXTRA_STOPWORDS
+
         with localconverter(ro.default_converter + pandas2ri.converter):
             ro.globalenv["texts_py"] = ro.StrVector(texts)
+            ro.globalenv["extra_sw"] = ro.StrVector(
+                [w.lower() for w in EXTRA_STOPWORDS.get(lang, []) + list(extra_stopwords or [])] or [""]
+            )
 
         r_code = f"""
         library(quanteda)
@@ -96,7 +102,7 @@ class RainetteBridge:
 
         tok <- tokens(corp, remove_punct = TRUE, remove_numbers = TRUE)
         tok <- tokens_tolower(tok)  # antes das stopwords: "É" no início da frase também sai
-        tok <- tokens_remove(tok, stopwords("{lang}"))
+        tok <- tokens_remove(tok, c(stopwords("{lang}"), extra_sw))
 
         dtm <- dfm(tok)
         dtm <- dfm_trim(dtm, min_docfreq = {int(min_docfreq)})

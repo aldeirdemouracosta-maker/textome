@@ -136,9 +136,11 @@ def run_bertopic(texts: List[str], n_topics: Optional[int] = None, seed: int = 4
 
     stop = None
     if language_stopwords == "pt":
+        from corpus import EXTRA_STOPWORDS
         from translator import _STOPWORDS
-        stop = sorted(_STOPWORDS["pt"] | {"a", "o", "e", "de", "do", "da", "dos", "das", "um", "uma",
-                                          "os", "as", "que", "em", "para", "por", "com", "se"})
+        stop = sorted(_STOPWORDS["pt"] | set(EXTRA_STOPWORDS["pt"])
+                      | {"a", "o", "e", "de", "do", "da", "dos", "das", "um", "uma",
+                         "os", "as", "que", "em", "para", "por", "com", "se"})
 
     n = len(texts)
     umap_model = UMAP(n_neighbors=max(2, min(15, n - 1)), n_components=5, min_dist=0.0,

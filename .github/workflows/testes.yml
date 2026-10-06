@@ -79,6 +79,7 @@ jobs:
           test -s saida/figuras/dendrograma.png   # dendrograma real do rainette
           test -s saida/figuras/afc.png
           test -s saida/relatorio.docx
+          python3 -c "import json; d = json.load(open('saida/classes.json')); formas = {f['forma'] for c in d['classes'] for f in c['formas']}; assert not formas & {'é', 'pra', 'né'}, formas & {'é', 'pra', 'né'}; print('palavras vazias removidas: ok')"
           python3 -c "import json; d = json.load(open('saida/classes.json')); n = len(d['todos_segmentos']); print('segmentos exportados do R:', n); assert n > 0 and all(s['classe'] >= 0 for s in d['todos_segmentos'])"
       - name: Análise completa pelo protocolo MCP (servidor stdio + R real)
         run: |

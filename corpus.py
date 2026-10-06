@@ -10,6 +10,13 @@ from typing import List
 
 _HEADER_RE = re.compile(r"^\s*\*{4}")
 
+# Complementos às listas Snowball (quanteda), que não trazem formas muito frequentes,
+# sobretudo na fala transcrita. Removidas da CHD e do BERTopic.
+EXTRA_STOPWORDS = {
+    "pt": ["é", "pra", "pro", "pras", "pros", "né", "tá", "tô", "aí", "daí", "nas", "nos",
+           "às", "ao", "aos", "num", "numa", "dum", "duma", "vc", "q"],
+}
+
 
 @dataclass
 class Document:

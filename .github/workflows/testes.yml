@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt -r requirements-mcp.txt
       - name: Testes (sem R e sem Ollama)
         run: |
           python test_cache.py
@@ -22,6 +22,7 @@ jobs:
           python test_limpeza_transcricao.py
           python test_analises.py
           python test_validacao.py
+          python test_mcp_triangulacao.py
       - name: Linha de comando (fumaça)
         run: python cli.py config-exemplo
 
@@ -47,6 +48,19 @@ jobs:
           grep -q '^\*\*\*\* \*ent_ent01 \*sexo_f \*bairro_centro$' corpus_entrevistas.txt
           grep -qiE 'sa[uú]de|bairro|lotado|atendid' corpus_entrevistas.txt
 
+  bertopic:
+    # BERTopic real (embeddings multilíngues) no corpus de exemplo.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -r requirements.txt -r requirements-topicos.txt
+      - name: Triangulação no corpus de exemplo
+        run: python exemplos/teste_bertopic.py
+
   docker:
     # Constrói a imagem (R + rainette + Python) e roda uma análise real
     # da CHD no corpus de exemplo, com LLM simulado.
@@ -66,6 +80,9 @@ jobs:
           test -s saida/figuras/afc.png
           test -s saida/relatorio.docx
           python3 -c "import json; d = json.load(open('saida/classes.json')); n = len(d['todos_segmentos']); print('segmentos exportados do R:', n); assert n > 0 and all(s['classe'] >= 0 for s in d['todos_segmentos'])"
+      - name: Análise completa pelo protocolo MCP (servidor stdio + R real)
+        run: |
+          docker run --rm textome python exemplos/cliente_mcp.py exemplos/corpus_demo.txt --mock --k 4
       - uses: actions/upload-artifact@v4
         if: always()
         with:

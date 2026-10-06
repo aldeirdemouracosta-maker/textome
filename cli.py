@@ -3,6 +3,7 @@ Textome na linha de comando — roda sem clicar e em lote.
 
   python cli.py run corpus.txt --config pesquisa.yaml --saida resultados/
   python cli.py run pasta_com_txts/ --k 6 --modelo llama3.1:8b
+  python cli.py run corpus.txt --topicos          # + triangulação com BERTopic
   python cli.py traduzir entrevistas_en.txt --saida traduzidos/
   python cli.py limpar corpus.txt --termos termos.txt --saida limpos/
   python cli.py importar respostas.csv --texto resposta --variaveis sexo idade --saida corpus.txt
@@ -85,6 +86,8 @@ def build_config(args: argparse.Namespace) -> Config:
         )
     return cfg.with_overrides(
         clean=False if getattr(args, "sem_limpeza", False) else None,
+        topics=True if getattr(args, "topicos", None) else None,
+        topic_mode=getattr(args, "topicos", None),
         k=getattr(args, "k", None),
         model=getattr(args, "modelo", None),
         source_lang=getattr(args, "idioma_origem", None),
@@ -308,6 +311,8 @@ def build_parser() -> argparse.ArgumentParser:
     common(run)
     run.add_argument("--sem-llm", action="store_true", help="não interpretar classes com LLM")
     run.add_argument("--profunda", action="store_true", help="interpretação aprofundada")
+    run.add_argument("--topicos", nargs="?", const="kmeans", choices=["kmeans", "auto"],
+                     help="triangular com BERTopic (kmeans = mesmo k da CHD; auto = HDBSCAN)")
 
     tr = sub.add_parser("traduzir", help="só traduzir corpus para português (formato IRaMuTeQ)")
     common(tr)

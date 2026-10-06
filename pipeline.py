@@ -38,6 +38,10 @@ class Config:
     compound_terms: List[str] = field(default_factory=list)  # ex.: "sistema único de saúde"
     # Análises complementares (AFC, similitude, nuvem, dendrograma) e relatório Word
     analyses: bool = True
+    # Triangulação com BERTopic (opcional; requer requirements-topicos.txt)
+    topics: bool = False
+    topic_mode: str = "kmeans"     # "kmeans" = mesmo k da CHD; "auto" = HDBSCAN
+    embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
     # Tradução
     translate: bool = True
     source_lang: str = "auto"
@@ -94,6 +98,7 @@ class PipelineResult:
     warnings: List[str] = field(default_factory=list)
     matrix: Any = None                     # analises.CorpusMatrix
     all_segments: List[Any] = field(default_factory=list)  # (texto, classe) de todos os segmentos
+    triangulation: Any = None              # triangulacao.Triangulation
     dendrogram_png: Optional[bytes] = None
     analysis: Any = None                   # analises.AnalysisOutput (preenchido em write_outputs)
 
@@ -222,6 +227,29 @@ def run_pipeline(
                 force_refresh=config.force_refresh,
             )
 
+    if config.topics:
+        if not result.all_segments:
+            result.warnings.append("Triangulação não feita: segmentos da CHD indisponíveis.")
+        else:
+            import triangulacao
+
+            log("Triangulação com BERTopic…")
+            try:
+                texts = [t for t, _ in result.all_segments]
+                n_classes = len([c for c in result.sizes if c > 0])
+                topics, words = triangulacao.run_bertopic(
+                    texts, n_topics=n_classes if config.topic_mode == "kmeans" else None,
+                    seed=config.seed, embedding_model=config.embedding_model,
+                )
+                result.triangulation = triangulacao.compare(
+                    [c for _, c in result.all_segments], topics, topic_words=words,
+                    method="BERTopic (KMeans, k igual à CHD)" if config.topic_mode == "kmeans"
+                    else "BERTopic (HDBSCAN)",
+                )
+                log(f"  {result.triangulation.summary()}")
+            except Exception as e:
+                result.warnings.append(f"Triangulação com BERTopic falhou: {type(e).__name__}: {e}")
+
     result.finished_at = datetime.now().isoformat(timespec="seconds")
     return result
 
@@ -269,6 +297,12 @@ def method_items(result: PipelineResult) -> List[str]:
             "classes × formas, análise de similitude (árvore máxima do grafo de coocorrência "
             "das 50 formas mais frequentes) e nuvem de palavras."
         )
+    if result.triangulation is not None:
+        items.append(
+            f"Triangulação com {result.triangulation.method}, a partir de embeddings semânticos "
+            f"(`{cfg.embedding_model}`), comparada às classes da CHD pelo índice de Rand ajustado "
+            "(ARI) e pela informação mútua normalizada (NMI)."
+        )
     if cfg.use_llm:
         items.append(
             f"Nomes e resumos das classes sugeridos pelo modelo `{cfg.model}` "
@@ -310,6 +344,16 @@ def build_report(result: PipelineResult) -> str:
         ]
         for key, path in result.analysis.figures.items():
             lines += [f"![{FIGURE_TITLES.get(key, key)}](figuras/{path.name})", ""]
+
+    if result.triangulation is not None:
+        tri = result.triangulation
+        lines += ["## Triangulação CHD × BERTopic", "", tri.summary(), "",
+                  "| Classe | Tópico predominante | % da classe | Palavras do tópico |", "|---|---|---:|---|"]
+        for cid in tri.class_ids:
+            b = tri.best_topic[cid]
+            lines.append(f"| {cid} — {_class_name(result, cid)} | T{b['topico']} | {b['pct_classe']:.0f}% | "
+                         f"{', '.join(tri.topic_words.get(b['topico'], []))} |")
+        lines.append("")
 
     lines += ["## Classes", ""]
     for cid, data in result.classes.items():
@@ -363,6 +407,21 @@ def write_outputs(result: PipelineResult, out_dir: str | Path) -> List[Path]:
             written += list(result.analysis.figures.values())
         except Exception as e:
             result.warnings.append(f"Análises complementares falharam: {e}")
+
+    if result.triangulation is not None:
+        from triangulacao import plot_crosstab
+
+        write("triangulacao.json", json.dumps(result.triangulation.to_dict(), ensure_ascii=False, indent=2))
+        try:
+            (out / "figuras").mkdir(exist_ok=True)
+            fig = plot_crosstab(result.triangulation,
+                                {cid: _class_name(result, cid) for cid in result.classes},
+                                out / "figuras" / "triangulacao.png")
+            written.append(fig)
+            if result.analysis is not None:
+                result.analysis.figures["triangulacao"] = fig
+        except Exception as e:
+            result.warnings.append(f"Figura da triangulação não gerada: {e}")
 
     write("relatorio.md", build_report(result))
     write("config_usada.yaml", result.config.to_yaml())

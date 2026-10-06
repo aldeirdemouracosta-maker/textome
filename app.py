@@ -97,6 +97,11 @@ with st.sidebar:
         "AFC, similitude, nuvem e relatório Word", value=True,
         help="Análises complementares no estilo do IRaMuTeQ + relatório .docx para download.",
     )
+    run_topics = st.checkbox(
+        "Triangular com BERTopic", value=False, disabled=not run_analyses,
+        help="Compara as classes da CHD com tópicos semânticos (ARI/NMI). "
+             "Requer: pip install -r requirements-topicos.txt",
+    )
     use_cache = st.checkbox("Usar cache SQLite", value=True)
     force_refresh = st.checkbox("Forçar nova geração (ignorar cache)", value=False)
 
@@ -303,6 +308,18 @@ def build_analysis_bundle(bridge, docs, final_docs, cleaning_report, classes, si
         finished_at=__import__("datetime").datetime.now().isoformat(timespec="seconds"),
     )
     result.matrix = bridge.get_matrix()
+    result.all_segments = st.session_state.get("all_segments") or []
+    if run_topics and result.all_segments:
+        import triangulacao
+
+        try:
+            topics, words = triangulacao.run_bertopic(
+                [t for t, _ in result.all_segments], n_topics=len(sizes), seed=cfg.seed)
+            result.triangulation = triangulacao.compare(
+                [c for _, c in result.all_segments], topics, topic_words=words,
+                method="BERTopic (KMeans, k igual à CHD)")
+        except Exception as e:
+            result.warnings.append(f"Triangulação com BERTopic falhou: {type(e).__name__}: {e}")
     with tempfile.TemporaryDirectory() as tmp:
         png = Path(tmp) / "d.png"
         err = bridge.save_dendrogram(str(png))

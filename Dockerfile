@@ -23,8 +23,9 @@ ENV VIRTUAL_ENV=/opt/venv \
 RUN python3 -m venv $VIRTUAL_ENV
 
 WORKDIR /app
-COPY requirements.txt requirements-r.txt requirements-audio.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-r.txt -r requirements-audio.txt
+COPY requirements.txt requirements-r.txt requirements-audio.txt requirements-mcp.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-r.txt -r requirements-audio.txt \
+    -r requirements-mcp.txt
 
 COPY . .
 

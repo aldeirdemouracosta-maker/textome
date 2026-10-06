@@ -103,6 +103,17 @@ def build_docx(result: "PipelineResult", path: str | Path) -> Path:
             _caption(doc, f"Figura {fig_n} – {FIGURE_TITLES.get(key, key)}. Fonte: elaborado com Textome.")
 
     total = sum(result.sizes.values()) or 1
+    tri = getattr(result, "triangulation", None)
+    if tri is not None:
+        doc.add_heading("Triangulação CHD × BERTopic", level=1)
+        doc.add_paragraph(tri.summary())
+        _table(doc, ["Classe", "Tópico predominante", "% da classe", "Palavras do tópico"], [
+            (f"{cid} — {_class_name(result, cid)}", f"T{tri.best_topic[cid]['topico']}",
+             f"{tri.best_topic[cid]['pct_classe']:.0f}%",
+             ", ".join(tri.topic_words.get(tri.best_topic[cid]["topico"], [])))
+            for cid in tri.class_ids
+        ], widths_cm=[5, 3, 2.5, 6])
+
     doc.add_heading("Classes", level=1)
     for cid, data in result.classes.items():
         n_seg = result.sizes.get(cid, 0)

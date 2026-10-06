@@ -432,6 +432,7 @@ FIGURE_TITLES = {
     "afc": "Análise fatorial de correspondência (AFC)",
     "similitude": "Análise de similitude",
     "nuvem": "Nuvem de palavras do corpus",
+    "triangulacao": "Triangulação: classes da CHD × tópicos do BERTopic",
 }
 
 

@@ -22,6 +22,8 @@ Interface moderna para **Classificação Hierárquica Descendante** (método Rei
 | `analises.py` | Estatísticas, AFC, similitude, nuvem e figuras |
 | `relatorio_docx.py` | Relatório Word |
 | `validacao.py` | Revisão de nomes, atribuição às cegas, kappa de Cohen |
+| `triangulacao.py` | BERTopic + ARI/NMI contra a CHD |
+| `mcp_server.py` | Servidor MCP |
 | `limpeza.py` | Limpeza IRaMuTeQ, validação de cabeçalhos, planilha → corpus |
 | `transcricao.py` | Áudio → texto com Whisper local (faster-whisper) |
 | `app_demo.py` | Demo só do módulo de interpretação |
@@ -163,6 +165,52 @@ e `validacao.json` (todas as respostas, para auditoria).
 As respostas da IA usam **saída estruturada** (JSON Schema no Ollama ≥ 0.5; em versões
 antigas, recua para `format="json"`).
 
+## Triangulação com BERTopic
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # opcional, sem GPU
+pip install -r requirements-topicos.txt
+python cli.py run corpus.txt --topicos          # mesmo k da CHD (KMeans)
+python cli.py run corpus.txt --topicos auto     # número de tópicos automático (HDBSCAN)
+```
+
+O BERTopic agrupa os mesmos segmentos pelo **significado** (embeddings multilíngues), sem olhar
+o vocabulário como a CHD. As duas partições são comparadas por **ARI** (índice de Rand
+ajustado) e **NMI** (informação mútua normalizada), com tabela classes × tópicos
+(`triangulacao.json`, `figuras/triangulacao.png` e seção no relatório). Convergência alta
+reforça que as classes não são artefato do método lexical; divergências indicam classes a
+examinar com mais cuidado. Na primeira execução o modelo de embeddings é baixado (~470 MB).
+
+## Servidor MCP (Claude Desktop / Claude Code)
+
+Permite pedir as análises em linguagem natural — por exemplo, *"rode a CHD em
+entrevistas.txt com k = 6 e me explique cada classe"*.
+
+```bash
+pip install -r requirements-mcp.txt
+# Claude Code:
+claude mcp add textome -e TEXTOME_DADOS=/caminho/dos/corpora -- python /caminho/textome/mcp_server.py
+```
+
+Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "textome": {
+      "command": "python",
+      "args": ["/caminho/textome/mcp_server.py"],
+      "env": { "TEXTOME_DADOS": "/caminho/dos/corpora" }
+    }
+  }
+}
+```
+
+Ferramentas: `listar_corpora`, `analisar_corpus`, `ler_resultado`, `segmentos_da_classe`,
+`traduzir_corpus`, `limpar_corpus`. **Segurança:** o servidor só lê e grava dentro de
+`TEXTOME_DADOS`. Os dados são processados localmente (R + Ollama); o Claude recebe apenas
+os resumos que as ferramentas devolvem — leve isso em conta em pesquisas com dados sensíveis.
+
 ## Linha de comando (sem clicar, em lote)
 
 ```bash
@@ -217,6 +265,7 @@ python test_cli.py
 python test_limpeza_transcricao.py
 python test_analises.py
 python test_validacao.py
+python test_mcp_triangulacao.py   # requer requirements-mcp.txt
 ```
 
 Os testes rodam automaticamente no GitHub Actions a cada envio.

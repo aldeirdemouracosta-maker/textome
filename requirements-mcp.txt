@@ -1,0 +1,2 @@
+# Servidor MCP (Claude Desktop / Claude Code). API 1.x do SDK (FastMCP).
+mcp>=1.10,<2
